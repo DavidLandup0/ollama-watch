@@ -1,5 +1,3 @@
-"""Rendering tests: labels, formatting, and colour-free output."""
-
 from __future__ import annotations
 
 import pytest

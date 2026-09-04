@@ -1,9 +1,3 @@
-"""State machine tests.
-
-These pin down the runner behaviours that are easy to get wrong, each of which
-produced a visibly wrong display before it was handled.
-"""
-
 from __future__ import annotations
 
 import pytest

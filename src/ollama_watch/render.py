@@ -1,5 +1,3 @@
-"""Terminal formatting. Nothing here touches the log or the server."""
-
 from __future__ import annotations
 
 import os
@@ -9,8 +7,7 @@ from datetime import datetime
 from .client import ModelInfo
 from .state import Phase, Receipt, RequestState
 
-#: User-facing phase names. The code says "prefill" because that is what the
-#: runner and the literature call it; the display says what it is doing.
+#: The code says "prefill", as the runner does; the display says what that is.
 PHASE_LABELS = {
     Phase.IDLE: "Idle",
     Phase.PREFILL: "Processing input",
@@ -19,7 +16,7 @@ PHASE_LABELS = {
 
 BAR_MIN, BAR_MAX = 10, 28
 BAR_FILLED, BAR_EMPTY = "█", "░"
-#: Divides a receipt into field groups: status | input | output | memory.
+#: Divides a receipt into groups: status | input | output | memory.
 SEPARATOR = "|"
 
 
@@ -85,37 +82,46 @@ def bar(fraction: float, width: int) -> str:
 def segmented_bar(parts: list[tuple[str, float]], width: int) -> str:
     """A bar divided proportionally between `(glyph, weight)` parts.
 
-    Widths are apportioned by largest remainder so the bar always fills
-    exactly `width`, and any part with a non-zero weight keeps at least one
-    cell rather than vanishing.
+    Widths come from cumulative rounded edges, so the bar always fills exactly
+    `width`; a part too small to earn a cell then borrows one from the largest
+    rather than vanishing.
     """
-    total = sum(max(0.0, weight) for _, weight in parts)
-    if total <= 0 or width <= 0:
+    present = [(glyph, weight) for glyph, weight in parts if weight > 0]
+    total = sum(weight for _, weight in present)
+    if not total or width <= 0:
         return " " * max(0, width)
 
-    exact = [(glyph, max(0.0, weight) / total * width) for glyph, weight in parts]
-    cells = [(glyph, int(value)) for glyph, value in exact]
-    present = [index for index, (_, value) in enumerate(exact) if value > 0]
-    if width >= len(present):  # only then can every part keep a cell
-        for index in present:
-            if cells[index][1] == 0:
-                cells[index] = (cells[index][0], 1)
+    edges = []
+    running = 0.0
+    for _, weight in present:
+        running += weight
+        edges.append(round(running / total * width))
+    counts = [end - start for start, end in zip([0] + edges, edges)]
 
-    short = width - sum(count for _, count in cells)
-    if short > 0:  # hand out the remainder to the largest fractional parts
-        order = sorted(range(len(exact)), key=lambda i: exact[i][1] % 1, reverse=True)
-        for index in order[:short]:
-            cells[index] = (cells[index][0], cells[index][1] + 1)
-    elif short < 0:  # over-filled by the minimum-one rule; trim the largest
-        order = sorted(range(len(cells)), key=lambda i: cells[i][1], reverse=True)
-        for index in order:
-            if short == 0:
-                break
-            take = min(-short, max(0, cells[index][1] - 1))
-            cells[index] = (cells[index][0], cells[index][1] - take)
-            short += take
+    for index, count in enumerate(counts):
+        if count == 0 and max(counts) > 1:  # no room to share below that
+            counts[counts.index(max(counts))] -= 1
+            counts[index] = 1
 
-    return "".join(glyph * count for glyph, count in cells)
+    return "".join(glyph * count for (glyph, _), count in zip(present, counts))
+
+
+def median(values) -> float | None:
+    """The middle value, or None if there are none."""
+    ordered = sorted(values)
+    return ordered[len(ordered) // 2] if ordered else None
+
+
+def session_bar(session, width: int) -> str:
+    """The session's time-accounting bar, with its legend."""
+    segments = session.segments()
+    legend = "  ".join(
+        f"{glyph} {label} {human_duration(seconds)}"
+        for glyph, label, seconds in segments
+        if seconds
+    )
+    bar = segmented_bar([(glyph, seconds) for glyph, _, seconds in segments], width)
+    return f"{bar}  {legend}"
 
 
 def format_model(
@@ -123,10 +129,9 @@ def format_model(
 ) -> str:
     """Describe the loaded model.
 
-    The context length is what /api/ps *declares* -- a VRAM-based default. The
-    MLX engine grows its KV cache past it rather than truncating, so when a
-    prompt exceeds the declared length the chip says so instead of implying a
-    limit that is not being enforced.
+    `context_length` is what /api/ps *declares*; the MLX engine grows its KV
+    cache past it rather than truncating, so an over-long prompt is shown as
+    `ctx<prompt` instead of implying a limit that is not enforced.
     """
     if model is None:
         return style.dim("[no model loaded]")

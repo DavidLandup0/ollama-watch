@@ -1,5 +1,3 @@
-"""Following the runner log, including restarts and mid-flight starts."""
-
 from __future__ import annotations
 
 import os
@@ -28,9 +26,8 @@ class LogLine:
 def _seed_lines(handle, window: int = SEED_BYTES) -> list[str]:
     """Lines from the most recent cache verdict to the end of the file.
 
-    Starting to follow a log mid-request would otherwise miss the verdict that
-    says how much of the prompt was already cached, leaving only the relative
-    remaining count to report.
+    Joining mid-request would otherwise miss the verdict saying how much of
+    the prompt was cached, leaving only a relative remaining count to report.
     """
     end = handle.tell()
     start = max(0, end - window)
@@ -58,10 +55,10 @@ def follow_lines(
 ) -> Iterator[LogLine]:
     """Yield log lines, seeding state and surviving rotation.
 
-    With `replay`, starts at the beginning of the file. Otherwise starts at the
-    end, first replaying the current request's lines as `seeded`. When `follow`
-    is false the iterator stops at end of file; otherwise it polls forever and
-    reopens the file when the server rotates it.
+    `replay` starts at the beginning of the file; otherwise it starts at the
+    end, first replaying the current request's lines as `seeded`. Without
+    `follow` the iterator stops at end of file, else it polls and reopens the
+    file when the server rotates it.
     """
     while not os.path.exists(path):
         if not follow:

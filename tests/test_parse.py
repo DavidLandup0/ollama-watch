@@ -1,5 +1,3 @@
-"""Parsing tests. Every line here is copied verbatim from a real server.log."""
-
 from __future__ import annotations
 
 import pytest

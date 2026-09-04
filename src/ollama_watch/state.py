@@ -1,18 +1,3 @@
-"""The request state machine.
-
-Everything Ollama does not put on the wire is reconstructed here from log
-events. Three facts about the runner's logging shape this code, and each is
-covered by a test:
-
-1. `Progress.processed` counts only *new* tokens and restarts at 0 per
-   request, so absolute progress needs the cache verdict added back.
-2. The runner prefills every token but the last -- that final token is fed as
-   decoding begins -- so `processed` stops one short of the total.
-3. Trailing events (peak memory, decode stats) arrive on either side of the
-   request-end line, so a finished request is held briefly before its receipt
-   is released.
-"""
-
 from __future__ import annotations
 
 import time
@@ -117,12 +102,8 @@ class RequestState:
         return self.remaining_tokens / rate
 
     def snapshot(self) -> "RequestState":
-        """An immutable-in-practice copy.
-
-        The tracker mutates its state in place, so consumers that buffer
-        updates must be handed a copy or every one of them would read back
-        with the final phase.
-        """
+        """A copy: the tracker mutates its state in place, so a consumer that
+        buffers updates would otherwise read them all back as the final one."""
         clone = replace(self)
         clone.samples = deque(self.samples, maxlen=self.samples.maxlen)
         return clone
@@ -177,25 +158,14 @@ class Receipt:
 class Tracker:
     """Folds log events into a live `RequestState` and finished `Receipt`s."""
 
-    def __init__(
-        self,
-        *,
-        match_tolerance_s: float = MATCH_TOLERANCE_S,
-        pending_grace_s: float = PENDING_GRACE_S,
-        stale_floor_s: float = STALE_FLOOR_S,
-    ) -> None:
+    def __init__(self) -> None:
         self.state = RequestState()
-        self.match_tolerance_s = match_tolerance_s
-        self.pending_grace_s = pending_grace_s
-        self.stale_floor_s = stale_floor_s
         #: Decode rate of the last request that reported one, as a reference
         #: while the current request is generating.
         self.last_decode_rate: float | None = None
         self.last_decode_exact: bool = False
         self._pending: Receipt | None = None
         self._last_progress_wall: float = time.time()
-
-    # ---------------- public API ----------------
 
     def feed(self, event: Event) -> list[Receipt]:
         """Apply one event. Returns any receipts it released."""
@@ -229,7 +199,7 @@ class Tracker:
         # quiet tail is the only signal that decoding has begun.
         if st.remaining_tokens >= PREFILL_BATCH:
             return []
-        if now - self._last_progress_wall > max(self.stale_floor_s, 1.5 * st.batch_interval_s):
+        if now - self._last_progress_wall > max(STALE_FLOOR_S, 1.5 * st.batch_interval_s):
             st.phase = Phase.DECODE
             st.prefill_done_at = st.last_event_at
         return []
@@ -248,12 +218,10 @@ class Tracker:
                 self._pending = None
         return out
 
-    # ---------------- internals ----------------
-
     def _expire_pending(self, ts: float) -> list[Receipt]:
         if self._pending is None:
             return []
-        if ts >= self._pending.ts + self.pending_grace_s:
+        if ts >= self._pending.ts + PENDING_GRACE_S:
             receipt, self._pending = self._pending, None
             return [receipt]
         return []
@@ -306,7 +274,7 @@ class Tracker:
         # its own reported duration lines up with the start we observed.
         if event.duration_s is not None and self.state.started_at is not None:
             implied_start = event.ts - event.duration_s
-            if abs(implied_start - self.state.started_at) > self.match_tolerance_s:
+            if abs(implied_start - self.state.started_at) > MATCH_TOLERANCE_S:
                 return []
         return self._finish(
             event.ts,
@@ -332,8 +300,7 @@ class Tracker:
             return []
 
         prefill_s = max(0.0, (st.prefill_done_at or st.last_event_at or ts) - (st.started_at or ts))
-        windowed = st.prefill_rate
-        rate = windowed or (st.prefilled_tokens / prefill_s if prefill_s > 0 else 0.0)
+        rate = st.prefill_rate or (st.prefilled_tokens / prefill_s if prefill_s > 0 else 0.0)
         fully_cached = st.cached_known and st.cached_tokens > 0 and st.prefilled_tokens == 0
         trusted = len(st.samples) >= 2 or fully_cached
 
@@ -342,7 +309,12 @@ class Tracker:
             self.state = RequestState()
             return []
 
-        decode_s = (ts - st.prefill_done_at) if st.prefill_done_at else None
+        queued_s = ttft_s = None
+        if arrived_at is not None:
+            ttft_s = max(0.0, (st.prefill_done_at or ts) - arrived_at)
+            if st.started_at is not None:
+                queued_s = max(0.0, st.started_at - arrived_at)
+
         receipt = Receipt(
             ts=ts,
             outcome=outcome,
@@ -351,16 +323,8 @@ class Tracker:
             duration_s=duration_s if duration_s is not None else (ts - (st.started_at or ts)),
             started_at=st.started_at,
             arrived_at=arrived_at,
-            queued_s=(
-                max(0.0, st.started_at - arrived_at)
-                if arrived_at is not None and st.started_at is not None
-                else None
-            ),
-            ttft_s=(
-                max(0.0, (st.prefill_done_at or ts) - arrived_at)
-                if arrived_at is not None
-                else None
-            ),
+            queued_s=queued_s,
+            ttft_s=ttft_s,
             prompt_tokens=st.prompt_tokens,
             cached_tokens=st.cached_tokens,
             prefilled_tokens=st.prefilled_tokens,
@@ -369,7 +333,7 @@ class Tracker:
             prefill_trusted=trusted,
             fully_cached=fully_cached,
             peak_memory=st.peak_memory,
-            decode_s=decode_s,
+            decode_s=(ts - st.prefill_done_at) if st.prefill_done_at else None,
         )
         if st.speculative is not None:
             self._apply_speculative(receipt, st.speculative)
@@ -382,13 +346,9 @@ class Tracker:
         self._pending = receipt
         return []
 
-    def _target(self) -> Receipt | None:
-        return self._pending
-
     def _attach_peak(self, event: PeakMemory) -> None:
-        target = self._target()
-        if target is not None:
-            target.peak_memory = event.size
+        if self._pending is not None:
+            self._pending.peak_memory = event.size
         else:
             self.state.peak_memory = event.size
 
@@ -416,19 +376,17 @@ class Tracker:
             self.last_decode_exact = receipt.decode_rate_exact
 
     def _attach_speculative(self, event: SpeculativeStats) -> None:
-        target = self._target()
-        if target is None:  # arrived before the request-end line
+        if self._pending is None:  # arrived before the request-end line
             self.state.speculative = event
             return
-        self._apply_speculative(target, event)
-        self._note_decode_rate(target)
+        self._apply_speculative(self._pending, event)
+        self._note_decode_rate(self._pending)
 
     def _attach_slot(self, event: SlotTiming) -> None:
         if event.kind != "eval":
             return
-        target = self._target()
-        if target is None:
+        if self._pending is None:
             self.state.slot_eval = event
             return
-        self._apply_slot(target, event)
-        self._note_decode_rate(target)
+        self._apply_slot(self._pending, event)
+        self._note_decode_rate(self._pending)

@@ -1,5 +1,3 @@
-"""Pure parsing of Ollama runner log lines: text in, event out."""
-
 from __future__ import annotations
 
 import re
@@ -87,13 +85,14 @@ def _int(kv: dict[str, str], key: str) -> int:
 
 def parse_line(line: str, *, now: float | None = None) -> Event | None:
     """Decode one log line, or return None if it carries nothing we track."""
+    now = time.time() if now is None else now
     gin = RE_GIN.search(line)
     if gin:
         date, clock, status, raw_duration, method, path = gin.groups()
         if method != "POST" or not path.startswith(REQUEST_PATHS):
             return None
         return RequestEnd(
-            ts=parse_gin_ts(date, clock) or (now if now is not None else time.time()),
+            ts=parse_gin_ts(date, clock) or now,
             status=status,
             duration_s=dur_seconds(raw_duration),
             raw_duration=raw_duration,
@@ -105,7 +104,7 @@ def parse_line(line: str, *, now: float | None = None) -> Event | None:
     if slot:
         task, label, ms, tokens, tps = slot.groups()
         return SlotTiming(
-            ts=now if now is not None else time.time(),
+            ts=now,
             task=int(task),
             kind=_SLOT_KINDS[label],
             ms=float(ms),
@@ -117,7 +116,7 @@ def parse_line(line: str, *, now: float | None = None) -> Event | None:
     msg = kv.get("msg")
     if not msg:
         return None
-    ts = parse_ts(kv.get("time")) or (now if now is not None else time.time())
+    ts = parse_ts(kv.get("time")) or now
 
     if msg in CACHE_MSGS:
         return CacheVerdict(

@@ -1,5 +1,3 @@
-"""The library's main entry point: a stream of state updates."""
-
 from __future__ import annotations
 
 import time
@@ -7,7 +5,7 @@ from dataclasses import dataclass, field
 from typing import Iterator
 
 from .client import DEFAULT_HOST, ModelInfo, fetch_loaded_model
-from .events import Event, RunnerReady
+from .events import Event
 from .parse import parse_line
 from .state import Receipt, RequestState, Tracker
 from .tail import DEFAULT_LOG, POLL_INTERVAL_S, follow_lines
@@ -98,4 +96,4 @@ def watch(
         yield _update(tracker, model=model, receipts=receipts)
 
 
-__all__ = ["Update", "watch", "RunnerReady"]
+__all__ = ["Update", "watch"]

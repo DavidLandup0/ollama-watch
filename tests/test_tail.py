@@ -1,5 +1,3 @@
-"""Log-following tests: seeding, rotation, replay."""
-
 from __future__ import annotations
 
 from ollama_watch import Phase, Tracker, follow_lines, parse_line, watch

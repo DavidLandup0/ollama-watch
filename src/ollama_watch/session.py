@@ -1,20 +1,10 @@
-"""Session time accounting: where the wall clock actually went.
-
-A session splits into time the model spent working and time it spent waiting
-for you. Working time splits again into processing input, generating output,
-and the remainder of a request that is neither (queueing, tokenising,
-templating). Everything else is idle -- the model sat loaded while you read,
-typed, or approved something.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 from .state import Receipt
 
-#: Distinct glyphs, not colours: a monochrome terminal theme must still be
-#: able to tell the segments of the bar apart.
+#: Glyphs, not colours: a monochrome theme must still separate the segments.
 INPUT_GLYPH, OUTPUT_GLYPH, OTHER_GLYPH, IDLE_GLYPH = "█", "▓", "▒", "░"
 
 
@@ -60,11 +50,8 @@ class Session:
 
     @property
     def idle_s(self) -> float:
-        """Span not accounted for by requests.
-
-        Clamped at zero: concurrent requests can overlap, so summed request
-        time may exceed the wall clock.
-        """
+        """Span not accounted for by requests. Clamped at zero, since
+        concurrent requests can sum to more than the wall clock."""
         return max(0.0, self.span_s - self.busy_s)
 
     def fraction(self, seconds: float) -> float:

@@ -1,9 +1,3 @@
-"""A btop-style full-screen view. Standard-library curses; no dependencies.
-
-Drawing is driven straight off `watch()`, which yields an idle beat every poll
-interval, so there is no second loop and no threads.
-"""
-
 from __future__ import annotations
 
 import curses
@@ -13,22 +7,19 @@ import time
 from collections import deque
 from datetime import datetime
 
-from .render import human_duration, human_tokens, segmented_bar
+from .render import bar as gauge  # the dashboard's name for it
+from .render import human_duration, human_tokens, median, session_bar
 from .session import Session
 from .state import Phase, Receipt
 from .watch import watch
 
 SPARK = "▁▂▃▄▅▆▇█"
-FULL, EMPTY = "█", "░"
 HISTORY = 48
 RE_SIZE = re.compile(r"([\d.]+)\s*([KMGT]i?)B", re.I)
 _UNITS = {"k": 1e3, "ki": 1024, "m": 1e6, "mi": 1024**2, "g": 1e9, "gi": 1024**3}
 
 CYAN, GREEN, YELLOW, RED, MAGENTA = range(1, 6)
 
-#: The request table. Terminal themes cannot be relied on to distinguish
-#: colours -- a pink monochrome theme renders red and green alike -- so status
-#: is carried by a glyph and by fixed columns, never by hue alone.
 COLUMNS = (
     ("time", 8, ">"),
     ("code", 8, ">"),
@@ -43,10 +34,31 @@ COLUMNS = (
     ("peak", 9, ">"),
 )
 MARKS = {"ok": "+", "fail": "!", "other": "-"}
+PAIRS = {"ok": GREEN, "fail": RED, "other": YELLOW}
+#: Non-HTTP outcomes, shortened to fit the code column.
+OUTCOMES = {"context canceled": "cancel", "superseded": "super", "in flight": "live"}
 
 
 def row(cells: list[str]) -> str:
     return "  ".join(f"{cell:{align}{width}}" for cell, (_, width, align) in zip(cells, COLUMNS))
+
+
+def cells(receipt: Receipt) -> list[str]:
+    """One table row's worth of fields, blank where a figure is unknown."""
+    approx = "" if receipt.generated_exact else "~"
+    return [
+        datetime.fromtimestamp(receipt.ts).strftime("%H:%M:%S"),
+        receipt.status or OUTCOMES.get(receipt.outcome, receipt.outcome.split()[0][:6]),
+        human_tokens(receipt.prompt_tokens),
+        f"{receipt.prefill_rate:.0f}" if receipt.prefill_rate else "",
+        f"{receipt.cache_fraction * 100:.0f}%" if receipt.cached_tokens else "",
+        f"{approx}{human_tokens(receipt.generated_tokens)}" if receipt.generated_tokens else "",
+        f"{approx}{receipt.decode_rate:.0f}" if receipt.decode_rate else "",
+        human_duration(receipt.queued_s) if receipt.queued_s else "",
+        human_duration(receipt.ttft_s) if receipt.ttft_s else "",
+        human_duration(receipt.duration_s) if receipt.duration_s else "",
+        f"{parse_size(receipt.peak_memory) / 1024**3:.1f} GiB" if receipt.peak_memory else "",
+    ]
 
 
 def colour(pair: int) -> int:
@@ -66,12 +78,6 @@ def spark(values: list[float], width: int) -> str:
     if peak <= 0:
         return SPARK[0] * len(recent)
     return "".join(SPARK[min(len(SPARK) - 1, int(v / peak * (len(SPARK) - 1)))] for v in recent)
-
-
-def gauge(fraction: float, width: int) -> str:
-    fraction = min(1.0, max(0.0, fraction))
-    filled = int(fraction * width)
-    return FULL * filled + EMPTY * (width - filled)
 
 
 def parse_size(text: str | None) -> float | None:
@@ -105,7 +111,6 @@ class Dashboard:
         self.row = 0
 
     # ---- drawing primitives ----
-
     def line(self, text: str = "", attr: int = 0) -> None:
         height, width = self.screen.getmaxyx()
         if self.row >= height:
@@ -120,11 +125,8 @@ class Dashboard:
         self.line(f" {label.ljust(pad)}{value}", attr)
 
     # ---- frame ----
-
-    def draw(self, update) -> None:
-        self.screen.erase()
-        self.row = 0
-        _, width = self.screen.getmaxyx()
+    def _absorb(self, update) -> None:
+        """Fold an update's finished requests into the history the frame reads."""
         self.session.observe(update.event.ts if update.event else time.time())
         for receipt in update.receipts:
             self.receipts.append(receipt)
@@ -135,7 +137,13 @@ class Dashboard:
                 self.output_rates.append(receipt.decode_rate)
             self.peak_bytes = parse_size(receipt.peak_memory) or self.peak_bytes
 
-        self._header(update, width)
+    def draw(self, update) -> None:
+        self._absorb(update)
+        self.screen.erase()
+        self.row = 0
+        _, width = self.screen.getmaxyx()
+
+        self._header(update)
         self.line()
         self._current(update, width)
         self.line()
@@ -145,11 +153,11 @@ class Dashboard:
         self.line()
         self._session(width)
         self.line()
-        self._recent(width)
-        self._footer(update, width)
+        self._recent()
+        self._footer()
         self.screen.refresh()
 
-    def _header(self, update, width: int) -> None:
+    def _header(self, update) -> None:
         model = update.model
         self.line(" ollama-watch", curses.A_BOLD)
         if model is None:
@@ -221,19 +229,18 @@ class Dashboard:
     ) -> None:
         spark_width = max(8, min(32, width - 52))
         value = f"{current:.0f} tok/s" if current else "--"
-        # padded to a fixed width: the two rows hold different numbers of bars,
-        # and a ragged right edge is what made this read as clutter
+        # padded: the rows hold different bar counts, and a ragged right edge
+        # pushes the figures out of their column
         bars = spark(history, spark_width).ljust(spark_width)
         span = f"{min(history):.0f}-{max(history):.0f}" if len(history) >= 2 else ""
         self.field(label, f"{bars}  {value.rjust(9)} {tag.ljust(5)} {span}", colour(pair))
 
     def _rates(self, update, width: int) -> None:
-        """Sparklines are one bar per finished request.
+        """One bar per finished request, with the current figure beside them.
 
-        The number beside them means different things by phase, and says which:
-        the input rate is live only while input is being processed, and the
-        generation rate is never live -- nothing is logged per token, so it is
-        always the last request that reported one.
+        The tag says which figure it is: the input rate is live only while
+        input is being processed, and the generation rate is never live --
+        nothing is logged per token, so it is always the last one reported.
         """
         state = update.state
         last = self.receipts[-1] if self.receipts else None
@@ -249,10 +256,10 @@ class Dashboard:
         )
 
     def _memory(self, update, width: int) -> None:
-        """Resident size against physical RAM, with peak marked in the bar.
+        """Resident size against physical RAM, with the peak marked in the bar.
 
         The bar tracks what the model holds *now*; the peak is a high-water
-        mark from a past request and would otherwise sit at full width forever.
+        mark from a past request, so it is a marker rather than more fill.
         """
         resident = float(update.model.size_vram_bytes or update.model.size_bytes) if update.model else 0.0
         if not resident and not self.peak_bytes:
@@ -274,27 +281,6 @@ class Dashboard:
             detail += f"   peak {self.peak_bytes / 1024**3:.1f} ({peak_fraction * 100:.0f}%)"
         self.field("memory", f"{''.join(bar)}  {detail}", colour(pair))
 
-    #: Non-HTTP outcomes, shortened to fit the code column.
-    OUTCOMES = {"context canceled": "cancel", "superseded": "super", "in flight": "live"}
-
-    @classmethod
-    def _cells(cls, receipt: Receipt) -> list[str]:
-        code = receipt.status or cls.OUTCOMES.get(receipt.outcome, receipt.outcome.split()[0][:6])
-        approx = "" if receipt.generated_exact else "~"
-        return [
-            datetime.fromtimestamp(receipt.ts).strftime("%H:%M:%S"),
-            code,
-            human_tokens(receipt.prompt_tokens),
-            f"{receipt.prefill_rate:.0f}" if receipt.prefill_rate else "",
-            f"{receipt.cache_fraction * 100:.0f}%" if receipt.cached_tokens else "",
-            f"{approx}{human_tokens(receipt.generated_tokens)}" if receipt.generated_tokens else "",
-            f"{approx}{receipt.decode_rate:.0f}" if receipt.decode_rate else "",
-            human_duration(receipt.queued_s) if receipt.queued_s else "",
-            human_duration(receipt.ttft_s) if receipt.ttft_s else "",
-            human_duration(receipt.duration_s) if receipt.duration_s else "",
-            f"{parse_size(receipt.peak_memory) / 1024**3:.1f} GiB" if receipt.peak_memory else "",
-        ]
-
     def _session(self, width: int) -> None:
         """Where the wall clock went: model working versus waiting for you."""
         session = self.session
@@ -308,14 +294,9 @@ class Dashboard:
             f"idle {human_duration(session.idle_s)} ({session.fraction(session.idle_s) * 100:.0f}%)",
             curses.A_BOLD,
         )
-        segments = session.segments()
-        bar_width = max(10, min(40, width - 62))
-        legend = "  ".join(
-            f"{glyph} {label} {human_duration(seconds)}" for glyph, label, seconds in segments if seconds
-        )
-        self.field("", f"{segmented_bar([(g, s) for g, _, s in segments], bar_width)}  {legend}")
+        self.field("", session_bar(session, max(10, min(40, width - 62))))
 
-    def _recent(self, width: int) -> None:
+    def _recent(self) -> None:
         height, _ = self.screen.getmaxyx()
         room = max(0, height - self.row - 2)
         if room < 3:
@@ -324,10 +305,9 @@ class Dashboard:
         room -= 1
         for receipt in list(self.receipts)[-room:]:
             key = "ok" if receipt.ok else "fail" if receipt.status else "other"
-            pair = {"ok": GREEN, "fail": RED, "other": YELLOW}[key]
-            self.line(f" {MARKS[key]} " + row(self._cells(receipt)), colour(pair))
+            self.line(f" {MARKS[key]} " + row(cells(receipt)), colour(PAIRS[key]))
 
-    def _footer(self, update, width: int) -> None:
+    def _footer(self) -> None:
         height, _ = self.screen.getmaxyx()
         self.row = max(self.row, height - 1)
         total = sum(r.prompt_tokens for r in self.receipts)
@@ -338,11 +318,10 @@ class Dashboard:
             summary.append(f"cache {100 * cached / total:.0f}%")
         for label, history in (("in", self.input_rates), ("out", self.output_rates)):
             if history:
-                ordered = sorted(history)
-                summary.append(f"median {label} {ordered[len(ordered) // 2]:.0f} tok/s")
-        ttfts = sorted(r.ttft_s for r in self.receipts if r.ttft_s)
-        if ttfts:
-            summary.append(f"median ttft {human_duration(ttfts[len(ttfts) // 2])}")
+                summary.append(f"median {label} {median(history):.0f} tok/s")
+        ttft = median(r.ttft_s for r in self.receipts if r.ttft_s)
+        if ttft:
+            summary.append(f"median ttft {human_duration(ttft)}")
         if failed:
             summary.append(f"failed {failed}")
         summary.append("q quit")

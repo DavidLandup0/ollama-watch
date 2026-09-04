@@ -1,5 +1,3 @@
-"""Command line front end: a live status line plus per-request receipts."""
-
 from __future__ import annotations
 
 import argparse
@@ -14,11 +12,12 @@ from .render import (
     format_status,
     human_duration,
     human_tokens,
-    segmented_bar,
+    median,
+    session_bar,
     supports_color,
 )
 from .session import Session
-from .state import Phase, Receipt
+from .state import Receipt
 from .tail import DEFAULT_LOG
 from .watch import PS_INTERVAL_S, watch
 
@@ -26,8 +25,7 @@ from .watch import PS_INTERVAL_S, watch
 class Display:
     """A single self-updating status line beneath scrolling receipts.
 
-    On a TTY the status line is redrawn in place. Piped, it prints a plain line
-    whenever progress actually moves, so the output stays useful in a file.
+    Redrawn in place on a TTY; piped, printed afresh whenever progress moves.
     """
 
     def __init__(self, style: Style, *, live: bool, stream=sys.stdout) -> None:
@@ -65,59 +63,55 @@ def summarise(receipts: list[Receipt], style: Style) -> list[str]:
         return []
     lines = ["", style.bold(f"{len(receipts)} request(s)")]
 
-    prefill = sorted(r.prefill_rate for r in receipts if r.prefill_trusted and r.prefill_rate > 0)
-    if prefill:
-        lines.append(
-            f"  input rate     median {prefill[len(prefill) // 2]:.0f} tok/s   "
-            f"min {prefill[0]:.0f}   max {prefill[-1]:.0f}"
-        )
-    decode = sorted(r.decode_rate for r in receipts if r.decode_rate)
-    if decode:
-        lines.append(
-            f"  output rate    median {decode[len(decode) // 2]:.0f} tok/s   "
-            f"min {decode[0]:.0f}   max {decode[-1]:.0f}"
-        )
-    ttfts = sorted(r.ttft_s for r in receipts if r.ttft_s)
+    def row(label: str, text: str) -> str:
+        """One aligned `label   value` line."""
+        return f"  {label:<13}  {text}"
+
+    def rate_row(label: str, rates: list[float]) -> None:
+        if rates:
+            lines.append(
+                row(label, f"median {median(rates):.0f} tok/s   min {min(rates):.0f}   max {max(rates):.0f}")
+            )
+
+    rate_row("input rate", [r.prefill_rate for r in receipts if r.prefill_trusted and r.prefill_rate > 0])
+    rate_row("output rate", [r.decode_rate for r in receipts if r.decode_rate])
+
+    ttfts = [r.ttft_s for r in receipts if r.ttft_s]
     if ttfts:
-        queued = sorted(r.queued_s for r in receipts if r.queued_s)
-        line = f"  ttft           median {human_duration(ttfts[len(ttfts) // 2])}   max {human_duration(ttfts[-1])}"
+        text = f"median {human_duration(median(ttfts))}   max {human_duration(max(ttfts))}"
+        queued = [r.queued_s for r in receipts if r.queued_s]
         if queued:
-            line += f"   queued median {human_duration(queued[len(queued) // 2])}"
-        lines.append(line)
+            text += f"   queued median {human_duration(median(queued))}"
+        lines.append(row("ttft", text))
 
     total = sum(r.prompt_tokens for r in receipts)
     cached = sum(r.cached_tokens for r in receipts)
     if total:
         lines.append(
-            f"  input tokens   {human_tokens(total)} total, "
-            f"{human_tokens(cached)} from cache ({100 * cached / total:.0f}%)"
+            row("input tokens", f"{human_tokens(total)} total, "
+                               f"{human_tokens(cached)} from cache ({100 * cached / total:.0f}%)")
         )
     generated = sum(r.generated_tokens or 0 for r in receipts)
     if generated:
-        lines.append(f"  output tokens  {human_tokens(generated)} total")
+        lines.append(row("output tokens", f"{human_tokens(generated)} total"))
+
     session = Session()
     for receipt in receipts:
         session.add(receipt)
     if session.span_s:
         lines.append(
-            f"  session        {human_duration(session.span_s)} span, "
-            f"{human_duration(session.busy_s)} working "
-            f"({session.fraction(session.busy_s) * 100:.0f}%), "
-            f"{human_duration(session.idle_s)} idle "
-            f"({session.fraction(session.idle_s) * 100:.0f}%)"
+            row("session", f"{human_duration(session.span_s)} span, "
+                           f"{human_duration(session.busy_s)} working "
+                           f"({session.fraction(session.busy_s) * 100:.0f}%), "
+                           f"{human_duration(session.idle_s)} idle "
+                           f"({session.fraction(session.idle_s) * 100:.0f}%)")
         )
-        segments = session.segments()
-        legend = "  ".join(
-            f"{glyph} {label} {human_duration(seconds)}"
-            for glyph, label, seconds in segments
-            if seconds
-        )
-        lines.append(f"                 {segmented_bar([(g, s) for g, _, s in segments], 32)}  {legend}")
+        lines.append(row("", session_bar(session, 32)))
 
     failed = [r for r in receipts if r.status and not r.ok]
     if failed:
         codes = ", ".join(sorted({r.status for r in failed if r.status}))
-        lines.append(style.red(f"  failed         {len(failed)} request(s): {codes}"))
+        lines.append(style.red(row("failed", f"{len(failed)} request(s): {codes}")))
     return lines
 
 

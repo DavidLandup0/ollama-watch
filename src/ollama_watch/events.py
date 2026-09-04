@@ -1,18 +1,10 @@
-"""Events decoded from the Ollama runner log.
-
-The runner logs two kinds of line: structured `key=value` records from Go's
-slog, and Gin HTTP access lines. Each is decoded into one of the frozen
-dataclasses below, which are the only vocabulary the rest of the library
-speaks. Timestamps are always epoch seconds.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Union
 
 #: The runner processes the prompt in batches of this many tokens, and logs
-#: one progress line per batch. It is the granularity of everything we can see.
+#: one progress line per batch.
 PREFILL_BATCH = 2048
 
 
@@ -20,9 +12,9 @@ PREFILL_BATCH = 2048
 class CacheVerdict:
     """A request started; the prefix cache reports how much it can reuse.
 
-    `total` is the absolute prompt length. `cached` was matched from a previous
-    request and costs nothing. `remaining` is the work actually left to do, and
-    is the denominator that subsequent `Progress.processed` counts toward.
+    `total` is the whole prompt, `cached` came free from a previous request,
+    and `remaining` is the work left -- the denominator `Progress.processed`
+    counts toward.
     """
 
     ts: float
@@ -39,8 +31,8 @@ class CacheVerdict:
 class Progress:
     """A prefill batch finished.
 
-    `processed` restarts at 0 for every request and counts only *new* tokens,
-    so absolute progress is `CacheVerdict.cached + processed`. `remaining_total`
+    `processed` restarts at 0 each request and counts only *new* tokens, so
+    absolute progress is `CacheVerdict.cached + processed`. `remaining_total`
     mirrors the verdict's `remaining`, not the prompt length.
     """
 
@@ -81,10 +73,7 @@ class PeakMemory:
 
 @dataclass(frozen=True)
 class SpeculativeStats:
-    """Per-request speculative-decoding summary from the MLX engine.
-
-    Logged once per request, on either side of the request-end line.
-    """
+    """MLX speculative-decoding summary, logged once per request."""
 
     ts: float
     iterations: int
@@ -94,22 +83,18 @@ class SpeculativeStats:
 
     @property
     def generated_tokens(self) -> int:
-        """Approximate tokens produced.
-
-        Each speculative iteration emits the draft tokens the target model
-        accepted, plus one token the target produces itself, so the generated
-        count is `accepted + iterations`. Approximate because a request that
-        stops mid-iteration is not reported separately.
-        """
+        """Approximate tokens produced: each iteration emits its accepted
+        draft tokens plus one from the target model. Approximate because a
+        request stopping mid-iteration is not reported separately."""
         return self.accepted + self.iterations
 
 
 @dataclass(frozen=True)
 class SlotTiming:
-    """Exact timing from the llama.cpp engine's `slot print_timing` lines.
+    """Exact timing from llama.cpp's `slot print_timing` lines.
 
-    `kind` is one of "prompt_eval", "eval" (decode) or "total". These lines
-    carry no timestamp of their own.
+    `kind` is "prompt_eval", "eval" (decode) or "total". These lines carry no
+    timestamp of their own.
     """
 
     ts: float

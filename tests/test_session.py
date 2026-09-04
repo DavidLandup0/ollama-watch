@@ -1,5 +1,3 @@
-"""Session accounting and the segmented bar."""
-
 from __future__ import annotations
 
 import pytest

@@ -1,5 +1,3 @@
-"""Dashboard tests: the pure helpers, plus one real frame rendered off-screen."""
-
 from __future__ import annotations
 
 import curses
