@@ -198,3 +198,33 @@ def test_rate_row_annotates_its_range():
     dashboard.draw(Update(tracker.state.snapshot(), model=MODEL))
     assert "28-89 over 3" in screen.text
 
+
+
+def test_rate_rows_say_which_number_they_are_showing():
+    """The input rate is live only while processing; generation never is."""
+    tracker = Tracker()
+    tracker.feed(CacheVerdict(ts=T0, total=49091, cached=0, remaining=49091))
+    tracker.feed(Progress(ts=T0 + 30, processed=2048, remaining_total=49091))
+    tracker.feed(Progress(ts=T0 + 60, processed=4096, remaining_total=49091))
+
+    screen = FakeScreen(width=130)
+    dashboard = Dashboard(screen)
+    dashboard.draw(Update(tracker.state.snapshot(), model=MODEL, last_decode_rate=12.0))
+    rows = {line.split()[0]: line for line in screen.rows.values() if line.strip()}
+    assert "now" in rows["input"]      # a request is being processed
+    assert "last" in rows["output"]    # generation rate is always historical
+
+
+def test_in_flight_request_shows_a_live_cell_after_a_divider():
+    from ollama_watch.dashboard import spark_live
+
+    assert spark_live([10.0, 20.0], 30.0, 4) == "▃▅┃█"
+    assert spark_live([10.0, 20.0], None, 4) == "▄█"
+
+
+def test_generating_phase_labels_the_input_rate_as_this_request():
+    tracker = Tracker()
+    tracker.feed(CacheVerdict(ts=T0, total=5000, cached=4999, remaining=1))
+    screen = FakeScreen(width=130)
+    Dashboard(screen).draw(Update(tracker.state.snapshot(), model=MODEL))
+    assert any("req" in line for line in screen.rows.values() if line.startswith(" input"))

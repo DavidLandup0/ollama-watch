@@ -8,7 +8,16 @@ import sys
 import time
 
 from .client import DEFAULT_HOST
-from .render import Style, format_receipt, format_status, human_tokens, supports_color
+from .render import (
+    Style,
+    format_receipt,
+    format_status,
+    human_duration,
+    human_tokens,
+    segmented_bar,
+    supports_color,
+)
+from .session import Session
 from .state import Phase, Receipt
 from .tail import DEFAULT_LOG
 from .watch import PS_INTERVAL_S, watch
@@ -68,6 +77,14 @@ def summarise(receipts: list[Receipt], style: Style) -> list[str]:
             f"  output rate    median {decode[len(decode) // 2]:.0f} tok/s   "
             f"min {decode[0]:.0f}   max {decode[-1]:.0f}"
         )
+    ttfts = sorted(r.ttft_s for r in receipts if r.ttft_s)
+    if ttfts:
+        queued = sorted(r.queued_s for r in receipts if r.queued_s)
+        line = f"  ttft           median {human_duration(ttfts[len(ttfts) // 2])}   max {human_duration(ttfts[-1])}"
+        if queued:
+            line += f"   queued median {human_duration(queued[len(queued) // 2])}"
+        lines.append(line)
+
     total = sum(r.prompt_tokens for r in receipts)
     cached = sum(r.cached_tokens for r in receipts)
     if total:
@@ -78,6 +95,25 @@ def summarise(receipts: list[Receipt], style: Style) -> list[str]:
     generated = sum(r.generated_tokens or 0 for r in receipts)
     if generated:
         lines.append(f"  output tokens  {human_tokens(generated)} total")
+    session = Session()
+    for receipt in receipts:
+        session.add(receipt)
+    if session.span_s:
+        lines.append(
+            f"  session        {human_duration(session.span_s)} span, "
+            f"{human_duration(session.busy_s)} working "
+            f"({session.fraction(session.busy_s) * 100:.0f}%), "
+            f"{human_duration(session.idle_s)} idle "
+            f"({session.fraction(session.idle_s) * 100:.0f}%)"
+        )
+        segments = session.segments()
+        legend = "  ".join(
+            f"{glyph} {label} {human_duration(seconds)}"
+            for glyph, label, seconds in segments
+            if seconds
+        )
+        lines.append(f"                 {segmented_bar([(g, s) for g, _, s in segments], 32)}  {legend}")
+
     failed = [r for r in receipts if r.status and not r.ok]
     if failed:
         codes = ", ".join(sorted({r.status for r in failed if r.status}))

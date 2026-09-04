@@ -138,6 +138,14 @@ class Receipt:
     status: str | None = None
     raw_duration: str | None = None
     duration_s: float | None = None
+    started_at: float | None = None
+    #: When the HTTP request reached the server, derived as end - duration.
+    #: Only known for requests that completed with a reported duration.
+    arrived_at: float | None = None
+    #: Time between arrival and the runner starting work: scheduler queueing.
+    queued_s: float | None = None
+    #: Time to first token: arrival until input processing finished.
+    ttft_s: float | None = None
     prompt_tokens: int = 0
     cached_tokens: int = 0
     prefilled_tokens: int = 0
@@ -229,7 +237,11 @@ class Tracker:
             out.append(self._pending)
             self._pending = None
         if self.state.active:
-            out += self._finish(self.state.last_event_at, "in flight")
+            # _finish defers into _pending, so drain it again afterwards
+            self._finish(self.state.last_event_at, "in flight")
+            if self._pending is not None:
+                out.append(self._pending)
+                self._pending = None
         return out
 
     # ---------------- internals ----------------
@@ -309,6 +321,8 @@ class Tracker:
         raw_duration: str | None = None,
         duration_s: float | None = None,
     ) -> list[Receipt]:
+        # Gin times the whole handler, so arrival precedes any scheduler wait.
+        arrived_at = (ts - duration_s) if duration_s is not None else None
         st = self.state
         if not st.active:
             return []
@@ -331,6 +345,18 @@ class Tracker:
             status=status,
             raw_duration=raw_duration,
             duration_s=duration_s if duration_s is not None else (ts - (st.started_at or ts)),
+            started_at=st.started_at,
+            arrived_at=arrived_at,
+            queued_s=(
+                max(0.0, st.started_at - arrived_at)
+                if arrived_at is not None and st.started_at is not None
+                else None
+            ),
+            ttft_s=(
+                max(0.0, (st.prefill_done_at or ts) - arrived_at)
+                if arrived_at is not None
+                else None
+            ),
             prompt_tokens=st.prompt_tokens,
             cached_tokens=st.cached_tokens,
             prefilled_tokens=st.prefilled_tokens,

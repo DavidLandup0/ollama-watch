@@ -58,24 +58,53 @@ Park it in a split pane next to whatever is talking to Ollama.
 
 ```
  ollama-watch
- model   qwen3.8:27b-mlx  38GB  100% GPU  ctx32768<63.3k  ∞
+ model   qwen3.8:27b-mlx  36GB  100% GPU  ctx32768<51.1k  ∞
 
  status  Processing input
-         ███████████████████████████░░░░░░░░░░░░░░░  64.7%  41.0k/63.3k
-         cached 34.8k  eta 3m56s
+         ███████████████████████████████████░░░░░░░░░  80.2%  41.0k/51.1k
+         cached 34.8k  eta 1m47s  ttft so far 2m10s
 
- input    95 tok/s  ▃▃█▅▂▁▂▂▃  20-164 over 9
- output   13 tok/s  ▂▂▄▄█▃  10-60 over 6
+ input    95 tok/s now   ▃█▂▁▂▂▃┃▅  20-164 over 7
+ output   12 tok/s last  ▂▂▄▄█▃  8-48 over 6
 
- memory  ██████████████████████████████████████░░  35.0 of 36 GiB   peak 38.2 (106%)
+ memory  ████████████████████████████████████░░░┊  33.2 of 36 GiB   peak 35.6 (99%)
 
-       time      code    input   in/s   cache     out   out/s     dur       peak
- + 01:01:01       200    50.3k     30     98%    ~303     ~15   1m01s   34.6 GiB
- ! 00:52:00       500    49.1k    164                           5m20s   32.8 GiB
- + 01:22:51       200     6930     46           ~1192     ~60   2m51s   37.3 GiB
+ session 1h23m   working 24m17s (29%)   idle 58m57s (71%)
+         █████████▓▒▒░░░░░░░░░░░░░░░░░░░░░░░░░░░░  █ input 18m51s  ▓ output 2m30s  ▒ other 2m56s  ░ idle 58m57s
 
- 9 req  cache 64%  median in 59 tok/s  median out 28 tok/s  failed 2  q quit
+       time      code    input   in/s   cache     out   out/s   queue    ttft     dur       peak
+ + 13:42:22       200    50.3k     30     98%    ~303     ~12    2.0s   43.0s   1m08s   33.2 GiB
+ ! 13:37:57       500    49.1k    164                            3.0s   5m03s   5m03s   32.6 GiB
+ + 14:09:19       200     6930     46           ~1192     ~48    9.0s   2m40s   3m05s   35.0 GiB
+
+ 7 req  cache 68%  median in 46 tok/s  median out 22 tok/s  median ttft 2m56s  failed 1  q quit
 ```
+
+## Session accounting
+
+The `session` panel splits the wall clock into where it actually went: time the
+model worked, versus time it sat loaded waiting for you to read, type or
+approve something. Working time splits again into processing input, generating
+output, and the remainder of a request that is neither (queueing, tokenising,
+templating). Segments use distinct glyphs, not colours.
+
+## Time to first token
+
+Gin times the whole HTTP handler, so a request's arrival is `end - duration`.
+From that: `queue` is arrival until the runner started work, and `ttft` is
+arrival until input processing finished -- the wait before the first token can
+appear. While a request is in flight the live panel shows `ttft so far`, which
+is a lower bound, since the figure is only final once the request ends.
+
+## Sparklines are history
+
+One bar per **finished** request; they do not move during a request. The number
+beside each says which figure it is: input reads `now` while input is being
+processed, `req` for the current request once it moves to generating, and
+`last` when idle. Generation always reads `last` -- nothing is logged per
+token, so there is no live generation rate to show. When a request is in
+flight, its provisional value appears after a `┃` divider so it ticks visibly
+without being mistaken for a completed one.
 
 Status is carried by a glyph (`+` ok, `!` failed, `-` other) and by fixed
 columns, never by colour alone -- a monochrome terminal theme renders red and

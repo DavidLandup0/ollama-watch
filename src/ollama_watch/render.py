@@ -82,6 +82,42 @@ def bar(fraction: float, width: int) -> str:
     return BAR_FILLED * filled + BAR_EMPTY * (width - filled)
 
 
+def segmented_bar(parts: list[tuple[str, float]], width: int) -> str:
+    """A bar divided proportionally between `(glyph, weight)` parts.
+
+    Widths are apportioned by largest remainder so the bar always fills
+    exactly `width`, and any part with a non-zero weight keeps at least one
+    cell rather than vanishing.
+    """
+    total = sum(max(0.0, weight) for _, weight in parts)
+    if total <= 0 or width <= 0:
+        return " " * max(0, width)
+
+    exact = [(glyph, max(0.0, weight) / total * width) for glyph, weight in parts]
+    cells = [(glyph, int(value)) for glyph, value in exact]
+    present = [index for index, (_, value) in enumerate(exact) if value > 0]
+    if width >= len(present):  # only then can every part keep a cell
+        for index in present:
+            if cells[index][1] == 0:
+                cells[index] = (cells[index][0], 1)
+
+    short = width - sum(count for _, count in cells)
+    if short > 0:  # hand out the remainder to the largest fractional parts
+        order = sorted(range(len(exact)), key=lambda i: exact[i][1] % 1, reverse=True)
+        for index in order[:short]:
+            cells[index] = (cells[index][0], cells[index][1] + 1)
+    elif short < 0:  # over-filled by the minimum-one rule; trim the largest
+        order = sorted(range(len(cells)), key=lambda i: cells[i][1], reverse=True)
+        for index in order:
+            if short == 0:
+                break
+            take = min(-short, max(0, cells[index][1] - 1))
+            cells[index] = (cells[index][0], cells[index][1] - take)
+            short += take
+
+    return "".join(glyph * count for glyph, count in cells)
+
+
 def format_model(
     model: ModelInfo | None, style: Style, *, prompt_tokens: int = 0
 ) -> str:

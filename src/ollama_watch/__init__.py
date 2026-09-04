@@ -29,7 +29,8 @@ from .events import (
     Terminated,
 )
 from .parse import dur_seconds, parse_kv, parse_line
-from .render import PHASE_LABELS, format_receipt, format_status
+from .render import PHASE_LABELS, format_receipt, format_status, segmented_bar
+from .session import Session
 from .state import Phase, Receipt, RequestState, Tracker
 from .tail import DEFAULT_LOG, LogLine, follow_lines
 from .watch import Update, watch
@@ -50,6 +51,7 @@ __all__ = [
     "Phase",
     "Progress",
     "Receipt",
+    "Session",
     "RequestEnd",
     "RequestState",
     "RunnerReady",
@@ -67,6 +69,7 @@ __all__ = [
     "format_status",
     "parse_kv",
     "parse_line",
+    "segmented_bar",
     "spark",
     "watch",
 ]

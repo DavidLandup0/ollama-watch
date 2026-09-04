@@ -13,7 +13,8 @@ import time
 from collections import deque
 from datetime import datetime
 
-from .render import human_duration, human_tokens
+from .render import human_duration, human_tokens, segmented_bar
+from .session import Session
 from .state import Phase, Receipt
 from .watch import watch
 
@@ -36,6 +37,8 @@ COLUMNS = (
     ("cache", 6, ">"),
     ("out", 6, ">"),
     ("out/s", 6, ">"),
+    ("queue", 6, ">"),
+    ("ttft", 6, ">"),
     ("dur", 6, ">"),
     ("peak", 9, ">"),
 )
@@ -63,6 +66,21 @@ def spark(values: list[float], width: int) -> str:
     if peak <= 0:
         return SPARK[0] * len(recent)
     return "".join(SPARK[min(len(SPARK) - 1, int(v / peak * (len(SPARK) - 1)))] for v in recent)
+
+
+def spark_live(history: list[float], live: float | None, width: int) -> str:
+    """History, then a divider, then a cell for the request in flight.
+
+    Both are scaled together so the live cell is comparable to the bars behind
+    it. Without the divider a provisional value would be indistinguishable
+    from a finished one.
+    """
+    if live is None:
+        return spark(history, width)
+    scaled = spark(history + [live], width + 1)
+    if len(scaled) < 2:
+        return scaled
+    return f"{scaled[:-1]}\u2503{scaled[-1]}"
 
 
 def gauge(fraction: float, width: int) -> str:
@@ -97,6 +115,7 @@ class Dashboard:
         self.output_rates: deque[float] = deque(maxlen=HISTORY)
         self.receipts: deque[Receipt] = deque(maxlen=HISTORY)
         self.peak_bytes: float | None = None
+        self.session = Session()
         self.total_bytes = total_memory()
         self.row = 0
 
@@ -121,8 +140,10 @@ class Dashboard:
         self.screen.erase()
         self.row = 0
         _, width = self.screen.getmaxyx()
+        self.session.observe(update.event.ts if update.event else time.time())
         for receipt in update.receipts:
             self.receipts.append(receipt)
+            self.session.add(receipt)
             if receipt.prefill_trusted and receipt.prefill_rate > 0:
                 self.input_rates.append(receipt.prefill_rate)
             if receipt.decode_rate:
@@ -136,6 +157,8 @@ class Dashboard:
         self._rates(update, width)
         self.line()
         self._memory(update, width)
+        self.line()
+        self._session(width)
         self.line()
         self._recent(width)
         self._footer(update, width)
@@ -187,6 +210,9 @@ class Dashboard:
                 detail.append(f"cached {human_tokens(state.cached_tokens)}")
             if state.eta_s is not None:
                 detail.append(f"eta {human_duration(state.eta_s)}")
+            if state.started_at:
+                # no token has been emitted yet, so this is TTFT so far
+                detail.append(f"ttft so far {human_duration(time.time() - state.started_at)}")
             self.field("", "  ".join(detail), curses.A_DIM)
             return
 
@@ -199,20 +225,44 @@ class Dashboard:
         )
         self.field("", f"input {human_tokens(state.prompt_tokens)}  {reference}", curses.A_DIM)
 
-    def _rate_row(self, label: str, current: float | None, history: list[float], width: int,
-                  pair: int) -> None:
-        spark_width = max(8, min(len(history) or 1, width - 46))
+    def _rate_row(
+        self,
+        label: str,
+        current: float | None,
+        tag: str,
+        history: list[float],
+        width: int,
+        pair: int,
+        *,
+        live: float | None = None,
+    ) -> None:
+        spark_width = max(8, min(len(history) or 1, width - 52))
         value = f"{current:.0f} tok/s" if current else "--"
-        text = f"{value.rjust(9)}  {spark(history, spark_width)}"
+        text = f"{value.rjust(9)} {tag.ljust(5)} {spark_live(history, live, spark_width)}"
         if len(history) >= 2:
             text += f"  {min(history):.0f}-{max(history):.0f} over {len(history)}"
         self.field(label, text, colour(pair))
 
     def _rates(self, update, width: int) -> None:
-        # While a request is in flight the input rate is live; the output rate
-        # is only known once a request ends, so it is the previous one.
-        self._rate_row("input", update.state.prefill_rate, list(self.input_rates), width, MAGENTA)
-        self._rate_row("output", update.last_decode_rate, list(self.output_rates), width, GREEN)
+        """Sparklines are one bar per finished request.
+
+        The numbers beside them mean different things by phase, and say which:
+        the input rate is live only while input is being processed, and the
+        generation rate is never live -- nothing is logged per token, so it is
+        always the last request that reported one.
+        """
+        state = update.state
+        last = self.receipts[-1] if self.receipts else None
+        if state.phase is Phase.PREFILL:
+            rate, tag, live = state.prefill_rate, "now", state.prefill_rate
+        elif state.phase is Phase.DECODE:
+            rate, tag, live = state.prefill_rate, "req", state.prefill_rate
+        else:
+            rate, tag, live = (last.prefill_rate if last else None), "last", None
+        self._rate_row("input", rate, tag, list(self.input_rates), width, MAGENTA, live=live)
+        self._rate_row(
+            "output", update.last_decode_rate, "last", list(self.output_rates), width, GREEN
+        )
 
     def _memory(self, update, width: int) -> None:
         """Resident size against physical RAM, with peak marked in the bar.
@@ -252,9 +302,31 @@ class Dashboard:
             f"{receipt.cache_fraction * 100:.0f}%" if receipt.cached_tokens else "",
             f"{approx}{human_tokens(receipt.generated_tokens)}" if receipt.generated_tokens else "",
             f"{approx}{receipt.decode_rate:.0f}" if receipt.decode_rate else "",
+            human_duration(receipt.queued_s) if receipt.queued_s else "",
+            human_duration(receipt.ttft_s) if receipt.ttft_s else "",
             human_duration(receipt.duration_s) if receipt.duration_s else "",
             f"{parse_size(receipt.peak_memory) / 1024**3:.1f} GiB" if receipt.peak_memory else "",
         ]
+
+    def _session(self, width: int) -> None:
+        """Where the wall clock went: model working versus waiting for you."""
+        session = self.session
+        if not session.span_s:
+            return
+        working = session.busy_s
+        self.field(
+            "session",
+            f"{human_duration(session.span_s)}   "
+            f"working {human_duration(working)} ({session.fraction(working) * 100:.0f}%)   "
+            f"idle {human_duration(session.idle_s)} ({session.fraction(session.idle_s) * 100:.0f}%)",
+            curses.A_BOLD,
+        )
+        segments = session.segments()
+        bar_width = max(10, min(40, width - 62))
+        legend = "  ".join(
+            f"{glyph} {label} {human_duration(seconds)}" for glyph, label, seconds in segments if seconds
+        )
+        self.field("", f"{segmented_bar([(g, s) for g, _, s in segments], bar_width)}  {legend}")
 
     def _recent(self, width: int) -> None:
         height, _ = self.screen.getmaxyx()
@@ -281,6 +353,9 @@ class Dashboard:
             if history:
                 ordered = sorted(history)
                 summary.append(f"median {label} {ordered[len(ordered) // 2]:.0f} tok/s")
+        ttfts = sorted(r.ttft_s for r in self.receipts if r.ttft_s)
+        if ttfts:
+            summary.append(f"median ttft {human_duration(ttfts[len(ttfts) // 2])}")
         if failed:
             summary.append(f"failed {failed}")
         summary.append("q quit")

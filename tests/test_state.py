@@ -226,3 +226,40 @@ def test_snapshot_is_independent_of_later_mutation():
     assert early.phase is Phase.PREFILL
     assert early.prefilled_tokens == 0
     assert tracker.state.phase is Phase.DECODE
+
+
+class TestTimeToFirstToken:
+    """Arrival is derived as end - duration, since Gin times the whole handler."""
+
+    def test_ttft_and_queue_are_measured_from_arrival(self):
+        tracker = Tracker()
+        # arrives at T0, the runner starts work 5s later, prefill ends at +65
+        tracker.feed(CacheVerdict(ts=T0 + 5, total=5000, cached=0, remaining=5000))
+        tracker.feed(Progress(ts=T0 + 35, processed=2500, remaining_total=5000))
+        tracker.feed(Progress(ts=T0 + 65, processed=4999, remaining_total=5000))
+        tracker.feed(end(T0 + 100, duration=100.0))
+        receipt = tracker.flush()[0]
+
+        assert receipt.arrived_at == pytest.approx(T0)
+        assert receipt.queued_s == pytest.approx(5.0)
+        assert receipt.ttft_s == pytest.approx(65.0)
+
+    def test_unknown_duration_leaves_them_unset(self):
+        tracker = Tracker()
+        tracker.feed(CacheVerdict(ts=T0, total=5000, cached=0, remaining=5000))
+        tracker.feed(Progress(ts=T0 + 30, processed=2500, remaining_total=5000))
+        tracker.feed(Progress(ts=T0 + 60, processed=4999, remaining_total=5000))
+        tracker.feed(Terminated(ts=T0 + 70, error="context canceled"))
+        receipt = tracker.flush()[0]
+
+        assert receipt.arrived_at is None
+        assert receipt.queued_s is None
+        assert receipt.ttft_s is None
+
+    def test_queue_is_never_negative(self):
+        tracker = Tracker()
+        tracker.feed(CacheVerdict(ts=T0, total=5000, cached=0, remaining=5000))
+        tracker.feed(Progress(ts=T0 + 30, processed=4999, remaining_total=5000))
+        tracker.feed(end(T0 + 40, duration=35.0))  # implies arrival after the start
+        receipt = tracker.flush()[0]
+        assert receipt.queued_s == 0.0
