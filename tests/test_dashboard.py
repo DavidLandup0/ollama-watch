@@ -8,7 +8,8 @@ import pytest
 
 from ollama_watch import Tracker, gauge, spark
 from ollama_watch.dashboard import Dashboard, parse_size
-from ollama_watch.events import CacheVerdict, PeakMemory, Progress, RequestEnd, SpeculativeStats
+from ollama_watch.events import (CacheVerdict, PeakMemory, Progress, RequestEnd,
+                                 SpeculativeStats, Terminated)
 from ollama_watch.client import ModelInfo
 from ollama_watch.watch import Update
 
@@ -196,7 +197,7 @@ def test_rate_row_annotates_its_range():
     dashboard = Dashboard(screen)
     dashboard.input_rates.extend([28.0, 60.0, 89.0])
     dashboard.draw(Update(tracker.state.snapshot(), model=MODEL))
-    assert "28-89 over 3" in screen.text
+    assert "28-89" in screen.text
 
 
 
@@ -228,3 +229,37 @@ def test_generating_phase_labels_the_input_rate_as_this_request():
     screen = FakeScreen(width=130)
     Dashboard(screen).draw(Update(tracker.state.snapshot(), model=MODEL))
     assert any("req" in line for line in screen.rows.values() if line.startswith(" input"))
+
+
+def test_rate_annotations_align_across_rows():
+    """The two sparklines hold different bar counts; their ranges must still
+    start at the same column."""
+    tracker = Tracker()
+    tracker.feed(CacheVerdict(ts=T0, total=49091, cached=0, remaining=49091))
+    tracker.feed(Progress(ts=T0 + 30, processed=2048, remaining_total=49091))
+    tracker.feed(Progress(ts=T0 + 60, processed=4096, remaining_total=49091))
+
+    screen = FakeScreen(width=130)
+    dashboard = Dashboard(screen)
+    dashboard.input_rates.extend([25.0, 50.0, 89.0] * 10)   # 30 bars
+    dashboard.output_rates.extend([9.0, 30.0, 68.0])        # 3 bars
+    dashboard.draw(Update(tracker.state.snapshot(), model=MODEL, last_decode_rate=11.0))
+
+    rows = {line.split()[0]: line for line in screen.rows.values() if line.strip()}
+    assert rows["input"].index("25-89") == rows["output"].index("9-68")
+    assert "over" not in rows["input"]  # the sample count is footer information
+
+
+def test_outcome_codes_are_shortened_to_fit():
+    tracker = Tracker()
+    tracker.feed(CacheVerdict(ts=T0, total=45900, cached=24600, remaining=21300))
+    tracker.feed(Progress(ts=T0 + 30, processed=2048, remaining_total=21300))
+    tracker.feed(Progress(ts=T0 + 60, processed=4096, remaining_total=21300))
+    tracker.feed(Terminated(ts=T0 + 70, error="context canceled"))
+    receipt = tracker.flush()[0]
+
+    screen = FakeScreen(width=130)
+    Dashboard(screen).draw(Update(tracker.state.snapshot(), model=MODEL, receipts=[receipt]))
+    text = screen.text
+    assert "cancel" in text
+    assert "context" not in text

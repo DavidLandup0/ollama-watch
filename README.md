@@ -64,10 +64,9 @@ Park it in a split pane next to whatever is talking to Ollama.
          ███████████████████████████████████░░░░░░░░░  80.2%  41.0k/51.1k
          cached 34.8k  eta 1m47s  ttft so far 2m10s
 
- input    95 tok/s now   ▃█▂▁▂▂▃┃▅  20-164 over 7
- output   12 tok/s last  ▂▂▄▄█▃  8-48 over 6
-
- memory  ████████████████████████████████████░░░┊  33.2 of 36 GiB   peak 35.6 (99%)
+ input    55 tok/s now   ▅▅▅▄█▆▃▄▂▄▄▅▅▄       25-89
+ output   11 tok/s last  ▁▄▄█▃▂▄              5-48
+ memory  ██████████████████████████░░░░░░░░░░  30.7 of 36 GiB   peak 39.5 (110%)
 
  session 1h23m   working 24m17s (29%)   idle 58m57s (71%)
          █████████▓▒▒░░░░░░░░░░░░░░░░░░░░░░░░░░░░  █ input 18m51s  ▓ output 2m30s  ▒ other 2m56s  ░ idle 58m57s
@@ -105,6 +104,10 @@ processed, `req` for the current request once it moves to generating, and
 token, so there is no live generation rate to show. When a request is in
 flight, its provisional value appears after a `┃` divider so it ticks visibly
 without being mistaken for a completed one.
+
+The figure to the right of each sparkline is the min-max rate across its bars.
+Sparklines are padded to a fixed width so that figure stays in one column
+even though the two rows rarely hold the same number of bars.
 
 Status is carried by a glyph (`+` ok, `!` failed, `-` other) and by fixed
 columns, never by colour alone -- a monochrome terminal theme renders red and

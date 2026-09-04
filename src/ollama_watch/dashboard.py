@@ -155,7 +155,6 @@ class Dashboard:
         self._current(update, width)
         self.line()
         self._rates(update, width)
-        self.line()
         self._memory(update, width)
         self.line()
         self._session(width)
@@ -236,12 +235,13 @@ class Dashboard:
         *,
         live: float | None = None,
     ) -> None:
-        spark_width = max(8, min(len(history) or 1, width - 52))
+        spark_width = max(8, min(32, width - 52))
         value = f"{current:.0f} tok/s" if current else "--"
-        text = f"{value.rjust(9)} {tag.ljust(5)} {spark_live(history, live, spark_width)}"
-        if len(history) >= 2:
-            text += f"  {min(history):.0f}-{max(history):.0f} over {len(history)}"
-        self.field(label, text, colour(pair))
+        # padded to a fixed width: the two rows hold different numbers of bars,
+        # and a ragged right edge is what made this read as clutter
+        bars = spark_live(history, live, spark_width).ljust(spark_width + 1)
+        span = f"{min(history):.0f}-{max(history):.0f}" if len(history) >= 2 else ""
+        self.field(label, f"{value.rjust(9)} {tag.ljust(5)} {bars}  {span}", colour(pair))
 
     def _rates(self, update, width: int) -> None:
         """Sparklines are one bar per finished request.
@@ -290,9 +290,12 @@ class Dashboard:
             detail += f"   peak {self.peak_bytes / 1024**3:.1f} ({peak_fraction * 100:.0f}%)"
         self.field("memory", f"{''.join(bar)}  {detail}", colour(pair))
 
-    @staticmethod
-    def _cells(receipt: Receipt) -> list[str]:
-        code = receipt.status or receipt.outcome.split(":")[0][:8]
+    #: Non-HTTP outcomes, shortened to fit the code column.
+    OUTCOMES = {"context canceled": "cancel", "superseded": "super", "in flight": "live"}
+
+    @classmethod
+    def _cells(cls, receipt: Receipt) -> list[str]:
+        code = receipt.status or cls.OUTCOMES.get(receipt.outcome, receipt.outcome.split()[0][:6])
         approx = "" if receipt.generated_exact else "~"
         return [
             datetime.fromtimestamp(receipt.ts).strftime("%H:%M:%S"),
