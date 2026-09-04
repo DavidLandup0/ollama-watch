@@ -15,6 +15,7 @@ it -- or hands it to you.
 """
 
 from .client import DEFAULT_HOST, ModelInfo, fetch_loaded_model
+from .dashboard import Dashboard, gauge, spark
 from .events import (
     PREFILL_BATCH,
     CacheVerdict,
@@ -37,6 +38,7 @@ __version__ = "0.1.0"
 
 __all__ = [
     "CacheVerdict",
+    "Dashboard",
     "DEFAULT_HOST",
     "DEFAULT_LOG",
     "Event",
@@ -60,9 +62,11 @@ __all__ = [
     "dur_seconds",
     "fetch_loaded_model",
     "follow_lines",
+    "gauge",
     "format_receipt",
     "format_status",
     "parse_kv",
     "parse_line",
+    "spark",
     "watch",
 ]

@@ -39,7 +39,8 @@ PYTHONPATH=src python3 -m ollama_watch.cli
 ## Use
 
 ```bash
-ollama-watch                       # follow live
+ollama-watch                       # follow live, one status line
+ollama-watch -d                    # full-screen dashboard
 ollama-watch --replay              # replay this log's history, then follow
 ollama-watch --replay --no-follow  # history + summary, then exit
 ollama-watch --log /path/to/server.log --host 127.0.0.1:11434
@@ -50,6 +51,39 @@ ollama-watch --no-server           # skip /api/ps (no model details in the heade
 cache hit share, and failure count.
 
 Park it in a split pane next to whatever is talking to Ollama.
+
+## Dashboard
+
+`ollama-watch -d` gives a btop-style full-screen view. `q` quits.
+
+```
+ ollama-watch
+ model   qwen3.8:27b-mlx  31GB  100% GPU  ctx32768<63.3k  ∞
+
+ status  Processing input
+         ██████████████████████████████░░░░░░░░░░░░░░░░  64.7%  41.0k/63.3k
+         cached 34.8k  eta 3m56s
+
+ input    95 tok/s  ▇▅▅▂▄█
+ output   13 tok/s  ▁▅▂▄▄█
+
+ memory  ████████████████████████████████████░░░░ 92% of 36 GiB  33.0 GiB peak
+
+ recent
+ +  14:11:56  200   in  49.1k  @  65 tok/s  out    557  @  13 tok/s
+ !  14:00:21  500   in  49.1k  @  80 tok/s
+
+ 6 req  cache 78%  q quit
+```
+
+Sparklines are per-request rates over recent history, each scaled to its own
+peak. The memory gauge compares peak request memory against physical RAM and
+turns yellow past 75% and red past 90% -- on a large prompt the KV cache, not
+the weights, is what fills it.
+
+It is `curses` from the standard library, drawn straight off `watch()`, which
+yields an idle beat every poll interval. No second loop, no threads, no
+dependencies.
 
 ## As a library
 

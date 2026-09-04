@@ -99,11 +99,26 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--no-server", action="store_true", help="do not query /api/ps for model details"
     )
+    parser.add_argument(
+        "-d", "--dashboard", action="store_true", help="full-screen dashboard view"
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+
+    if args.dashboard:
+        from .dashboard import run
+
+        return run(
+            log=args.log,
+            host=args.host,
+            replay=args.replay,
+            follow=not args.no_follow,
+            query_server=not args.no_server,
+        )
+
     style = Style(supports_color(sys.stdout))
     display = Display(style, live=sys.stdout.isatty() and not args.no_follow)
     collected: list[Receipt] = []

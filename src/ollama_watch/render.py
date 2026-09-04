@@ -19,6 +19,8 @@ PHASE_LABELS = {
 
 BAR_MIN, BAR_MAX = 10, 28
 BAR_FILLED, BAR_EMPTY = "█", "░"
+#: Divides a receipt into field groups: status | input | output | memory.
+SEPARATOR = "|"
 
 
 class Style:
@@ -181,7 +183,7 @@ def format_receipt(receipt: Receipt, style: Style) -> str:
     ]
     if receipt.raw_duration:
         parts.append(receipt.raw_duration)
-    parts.append(style.dim("|"))
+    parts.append(style.dim(SEPARATOR))
     parts.append(f"input {human_tokens(receipt.prompt_tokens)}")
     if receipt.cached_tokens:
         parts.append(style.green(f"cached {human_tokens(receipt.cached_tokens)}"))
@@ -196,16 +198,17 @@ def format_receipt(receipt: Receipt, style: Style) -> str:
 
     if receipt.generated_tokens is not None:
         marker = "" if receipt.generated_exact else "~"
-        parts.append(style.dim("|"))
+        parts.append(style.dim(SEPARATOR))
         parts.append(f"out {marker}{human_tokens(receipt.generated_tokens)}")
         if receipt.decode_rate:
             parts.append(f"@ {marker}{receipt.decode_rate:.0f} tok/s")
         if receipt.decode_s:
             parts.append(style.dim(f"({human_duration(receipt.decode_s)})"))
         if receipt.acceptance is not None:
-            parts.append(style.dim(f"spec {receipt.acceptance:.2f}"))
+            parts.append(style.dim(f"mtp_accept_rate {receipt.acceptance:.2f}"))
 
     if receipt.peak_memory:
+        parts.append(style.dim(SEPARATOR))
         parts.append(style.dim(f"peak {receipt.peak_memory}"))
     if receipt.outcome != "completed" and receipt.status is None:
         parts.append(style.red(f"[{receipt.outcome}]"))

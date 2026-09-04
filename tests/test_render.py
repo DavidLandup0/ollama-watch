@@ -95,7 +95,7 @@ def test_approximate_generation_is_marked():
     tracker.feed(SpeculativeStats(ts=T0 + 60, iterations=100, drafted=300, accepted=250, acceptance=0.83))
     text = format_receipt(tracker.flush()[0], PLAIN)
     assert "out ~350" in text
-    assert "spec 0.83" in text
+    assert "mtp_accept_rate 0.83" in text
 
 
 def test_plain_style_emits_no_escapes():
@@ -145,3 +145,28 @@ def test_context_chip_is_plain_when_within_the_window():
     tracker.feed(CacheVerdict(ts=T0, total=20000, cached=0, remaining=20000))
     line = format_status(tracker.state, MODEL, PLAIN, now=T0, columns=140)
     assert "ctx32768" in line and "<" not in line
+
+
+def test_receipt_groups_are_delimited():
+    """status | input | output | memory -- so adjacent fields cannot be misread
+    as one, e.g. `mtp_accept_rate` running into `peak`."""
+    from ollama_watch.events import PeakMemory, SpeculativeStats
+
+    tracker = Tracker()
+    tracker.feed(CacheVerdict(ts=T0, total=6931, cached=0, remaining=6931))
+    tracker.feed(Progress(ts=T0 + 40, processed=2048, remaining_total=6931))
+    tracker.feed(Progress(ts=T0 + 77, processed=6930, remaining_total=6931))
+    tracker.feed(
+        RequestEnd(ts=T0 + 151, status="200", duration_s=151.0, raw_duration="2m31s",
+                   path="/v1/chat/completions", method="POST")
+    )
+    tracker.feed(SpeculativeStats(ts=T0 + 151, iterations=300, drafted=1100, accepted=892, acceptance=0.78))
+    tracker.feed(PeakMemory(ts=T0 + 151.1, size="32.49 GiB"))
+    text = format_receipt(tracker.flush()[0], PLAIN)
+
+    groups = [group.strip() for group in text.split("|")]
+    assert len(groups) == 4
+    assert groups[1].startswith("input")
+    assert groups[2].startswith("out")
+    assert groups[3] == "peak 32.49 GiB"
+    assert "mtp_accept_rate 0.78" in groups[2]
