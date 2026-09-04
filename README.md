@@ -64,9 +64,10 @@ Park it in a split pane next to whatever is talking to Ollama.
          ███████████████████████████████████░░░░░░░░░  80.2%  41.0k/51.1k
          cached 34.8k  eta 1m47s  ttft so far 2m10s
 
- input    55 tok/s now   ▅▅▅▄█▆▃▄▂▄▄▅▅▄       25-89
- output   11 tok/s last  ▁▄▄█▃▂▄              5-48
- memory  ██████████████████████████░░░░░░░░░░  30.7 of 36 GiB   peak 39.5 (110%)
+ input   ▆▅▅▅▅▄▄▄▅▅▅▅▄█▃            55 tok/s now   25-89
+ output  ▂▅▂▁▄▄█▃▂                  11 tok/s last  9-68
+
+ memory  ███████████████████████████░░░┊░  31.7 of 36 GiB   peak 34.9 (97%)
 
  session 1h23m   working 24m17s (29%)   idle 58m57s (71%)
          █████████▓▒▒░░░░░░░░░░░░░░░░░░░░░░░░░░░░  █ input 18m51s  ▓ output 2m30s  ▒ other 2m56s  ░ idle 58m57s
@@ -97,7 +98,10 @@ is a lower bound, since the figure is only final once the request ends.
 
 ## Sparklines are history
 
-One bar per **finished** request; they do not move during a request. The number
+One bar per **finished** request, **oldest on the left, newest on the right**.
+They do not move during a request. The current figure sits immediately to the
+right of the bars, beside the newest one, so the row reads oldest to newest to
+now in one direction. The number
 beside each says which figure it is: input reads `now` while input is being
 processed, `req` for the current request once it moves to generating, and
 `last` when idle. Generation always reads `last` -- nothing is logged per

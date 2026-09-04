@@ -155,6 +155,7 @@ class Dashboard:
         self._current(update, width)
         self.line()
         self._rates(update, width)
+        self.line()
         self._memory(update, width)
         self.line()
         self._session(width)
@@ -241,7 +242,7 @@ class Dashboard:
         # and a ragged right edge is what made this read as clutter
         bars = spark_live(history, live, spark_width).ljust(spark_width + 1)
         span = f"{min(history):.0f}-{max(history):.0f}" if len(history) >= 2 else ""
-        self.field(label, f"{value.rjust(9)} {tag.ljust(5)} {bars}  {span}", colour(pair))
+        self.field(label, f"{bars}  {value.rjust(9)} {tag.ljust(5)} {span}", colour(pair))
 
     def _rates(self, update, width: int) -> None:
         """Sparklines are one bar per finished request.

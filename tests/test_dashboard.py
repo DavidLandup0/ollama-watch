@@ -263,3 +263,39 @@ def test_outcome_codes_are_shortened_to_fit():
     text = screen.text
     assert "cancel" in text
     assert "context" not in text
+
+
+def test_every_bar_starts_in_the_same_column():
+    """The rate sparklines and the memory gauge must share a left edge; when
+    they did not, the memory bar read as a continuation of the one above it."""
+    tracker = Tracker()
+    tracker.feed(CacheVerdict(ts=T0, total=49091, cached=0, remaining=49091))
+    tracker.feed(Progress(ts=T0 + 30, processed=2048, remaining_total=49091))
+
+    screen = FakeScreen(width=130)
+    dashboard = Dashboard(screen)
+    dashboard.total_bytes = 36 * 1024**3
+    dashboard.input_rates.extend([25.0, 89.0])
+    dashboard.output_rates.extend([9.0, 68.0])
+    dashboard.peak_bytes = 35.0 * 1024**3
+    dashboard.draw(Update(tracker.state.snapshot(), model=MODEL, last_decode_rate=11.0))
+
+    rows = {line.split()[0]: line for line in screen.rows.values() if line.strip()}
+    edges = {name: len(rows[name]) - len(rows[name].lstrip()[len(name):].lstrip()) for name in ("input", "output", "memory")}
+    starts = {name: rows[name].index(next(c for c in rows[name] if c in "\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588\u2591")) for name in ("input", "output", "memory")}
+    assert len(set(starts.values())) == 1, starts
+
+
+def test_current_value_sits_to_the_right_of_the_history():
+    """Newest bar is rightmost, so the current figure belongs beside it."""
+    tracker = Tracker()
+    tracker.feed(CacheVerdict(ts=T0, total=49091, cached=0, remaining=49091))
+    tracker.feed(Progress(ts=T0 + 30, processed=2048, remaining_total=49091))
+    tracker.feed(Progress(ts=T0 + 60, processed=4096, remaining_total=49091))
+
+    screen = FakeScreen(width=130)
+    dashboard = Dashboard(screen)
+    dashboard.input_rates.extend([25.0, 89.0])
+    dashboard.draw(Update(tracker.state.snapshot(), model=MODEL))
+    row = next(line for line in screen.rows.values() if line.startswith(" input"))
+    assert row.index("\u2588") < row.index("tok/s")
