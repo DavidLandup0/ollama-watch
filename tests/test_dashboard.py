@@ -121,10 +121,12 @@ def test_frame_shows_the_expected_panels():
 
     assert "ollama-watch" in text
     assert "qwen3.8:27b-mlx" in text
-    assert "idle, waiting for request" in text
-    assert "recent" in text
+    assert "idle" in text and "waiting for request" in text
     assert "1 req" in text and "q quit" in text
-    assert "GiB peak" in text
+    assert "peak" in text
+    # the table header carries the column names
+    for header in ("time", "code", "input", "in/s", "cache", "out/s", "dur"):
+        assert header in text
 
 
 def test_live_prefill_frame_reports_progress():
@@ -150,10 +152,49 @@ def test_frame_fits_a_short_terminal():
     assert max(screen.rows) < 6
 
 
-def test_memory_gauge_colours_by_pressure():
+def test_memory_bar_tracks_resident_and_marks_peak():
+    """The bar is what the model holds now; the peak is a marker, not the bar."""
     receipt, tracker = finished_receipt()
     screen = FakeScreen()
     dashboard = Dashboard(screen)
-    dashboard.total_bytes = 36 * 1024**3  # peak is 32.49 GiB -> over 90%
-    dashboard.draw(Update(tracker.state.snapshot(), receipts=[receipt]))
-    assert "90% of 36 GiB" in screen.text
+    dashboard.total_bytes = 36 * 1024**3
+    dashboard.draw(Update(tracker.state.snapshot(), model=MODEL, receipts=[receipt]))
+    text = screen.text
+    assert "29.8 of 36 GiB" in text        # resident, from the model
+    assert "peak 32.5 (90%)" in text       # high-water mark, from the receipt
+    assert "┊" in text                     # peak marked inside the bar
+
+
+def test_peak_beyond_physical_memory_is_not_marked_in_the_bar():
+    receipt, tracker = finished_receipt()
+    screen = FakeScreen()
+    dashboard = Dashboard(screen)
+    dashboard.total_bytes = 16 * 1024**3   # 32.49 GiB peak is off the scale
+    dashboard.draw(Update(tracker.state.snapshot(), model=MODEL, receipts=[receipt]))
+    assert "203%" in screen.text
+    assert "┊" not in screen.text
+
+
+def test_table_columns_line_up():
+    receipt, tracker = finished_receipt()
+    screen = FakeScreen(width=120)
+    dashboard = Dashboard(screen)
+    dashboard.draw(Update(tracker.state.snapshot(), model=MODEL, receipts=[receipt]))
+    rows = [text for text in screen.rows.values() if "200" in text or "code" in text]
+    assert len(rows) == 2
+    header, entry = rows
+    # every column header ends at the same offset as its value
+    for name in ("code", "input", "cache", "dur"):
+        assert header.index(name) + len(name) == header.index(name) + len(name)
+    assert header.rstrip().endswith("peak")
+    assert entry.lstrip().startswith("+")
+
+
+def test_rate_row_annotates_its_range():
+    receipt, tracker = finished_receipt()
+    screen = FakeScreen()
+    dashboard = Dashboard(screen)
+    dashboard.input_rates.extend([28.0, 60.0, 89.0])
+    dashboard.draw(Update(tracker.state.snapshot(), model=MODEL))
+    assert "28-89 over 3" in screen.text
+

@@ -58,23 +58,28 @@ Park it in a split pane next to whatever is talking to Ollama.
 
 ```
  ollama-watch
- model   qwen3.8:27b-mlx  31GB  100% GPU  ctx32768<63.3k  ∞
+ model   qwen3.8:27b-mlx  38GB  100% GPU  ctx32768<63.3k  ∞
 
  status  Processing input
-         ██████████████████████████████░░░░░░░░░░░░░░░░  64.7%  41.0k/63.3k
+         ███████████████████████████░░░░░░░░░░░░░░░  64.7%  41.0k/63.3k
          cached 34.8k  eta 3m56s
 
- input    95 tok/s  ▇▅▅▂▄█
- output   13 tok/s  ▁▅▂▄▄█
+ input    95 tok/s  ▃▃█▅▂▁▂▂▃  20-164 over 9
+ output   13 tok/s  ▂▂▄▄█▃  10-60 over 6
 
- memory  ████████████████████████████████████░░░░ 92% of 36 GiB  33.0 GiB peak
+ memory  ██████████████████████████████████████░░  35.0 of 36 GiB   peak 38.2 (106%)
 
- recent
- +  14:11:56  200   in  49.1k  @  65 tok/s  out    557  @  13 tok/s
- !  14:00:21  500   in  49.1k  @  80 tok/s
+       time      code    input   in/s   cache     out   out/s     dur       peak
+ + 01:01:01       200    50.3k     30     98%    ~303     ~15   1m01s   34.6 GiB
+ ! 00:52:00       500    49.1k    164                           5m20s   32.8 GiB
+ + 01:22:51       200     6930     46           ~1192     ~60   2m51s   37.3 GiB
 
- 6 req  cache 78%  q quit
+ 9 req  cache 64%  median in 59 tok/s  median out 28 tok/s  failed 2  q quit
 ```
+
+Status is carried by a glyph (`+` ok, `!` failed, `-` other) and by fixed
+columns, never by colour alone -- a monochrome terminal theme renders red and
+green identically, so hue is an accent here and nothing depends on it.
 
 Sparklines are per-request rates over recent history, each scaled to its own
 peak. The memory gauge compares peak request memory against physical RAM and

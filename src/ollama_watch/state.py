@@ -137,6 +137,7 @@ class Receipt:
     outcome: str
     status: str | None = None
     raw_duration: str | None = None
+    duration_s: float | None = None
     prompt_tokens: int = 0
     cached_tokens: int = 0
     prefilled_tokens: int = 0
@@ -292,7 +293,11 @@ class Tracker:
             if abs(implied_start - self.state.started_at) > self.match_tolerance_s:
                 return []
         return self._finish(
-            event.ts, "completed", status=event.status, raw_duration=event.raw_duration
+            event.ts,
+            "completed",
+            status=event.status,
+            raw_duration=event.raw_duration,
+            duration_s=event.duration_s,
         )
 
     def _finish(
@@ -302,6 +307,7 @@ class Tracker:
         *,
         status: str | None = None,
         raw_duration: str | None = None,
+        duration_s: float | None = None,
     ) -> list[Receipt]:
         st = self.state
         if not st.active:
@@ -324,6 +330,7 @@ class Tracker:
             outcome=outcome,
             status=status,
             raw_duration=raw_duration,
+            duration_s=duration_s if duration_s is not None else (ts - (st.started_at or ts)),
             prompt_tokens=st.prompt_tokens,
             cached_tokens=st.cached_tokens,
             prefilled_tokens=st.prefilled_tokens,
