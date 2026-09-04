@@ -263,3 +263,61 @@ class TestTimeToFirstToken:
         tracker.feed(end(T0 + 40, duration=35.0))  # implies arrival after the start
         receipt = tracker.flush()[0]
         assert receipt.queued_s == 0.0
+
+
+class TestDecodeMetricsArriveOnEitherSide:
+    """The runner logs decode stats before or after the request-end line,
+    depending on sub-second ordering. Both must be captured."""
+
+    def _drive(self, tracker):
+        tracker.feed(CacheVerdict(ts=T0, total=50427, cached=50294, remaining=133))
+        tracker.feed(Progress(ts=T0 + 3, processed=132, remaining_total=133))
+
+    def test_stats_before_the_end_line(self):
+        tracker = Tracker()
+        self._drive(tracker)
+        tracker.feed(SpeculativeStats(ts=T0 + 15.6, iterations=55, drafted=165, accepted=144, acceptance=0.87))
+        tracker.feed(end(T0 + 15.7, duration=15.6))
+        receipt = tracker.flush()[0]
+        assert receipt.generated_tokens == 144 + 55
+        assert receipt.acceptance == pytest.approx(0.87)
+        assert receipt.decode_rate is not None
+
+    def test_stats_after_the_end_line(self):
+        tracker = Tracker()
+        self._drive(tracker)
+        tracker.feed(end(T0 + 15.7, duration=15.6))
+        tracker.feed(SpeculativeStats(ts=T0 + 15.8, iterations=55, drafted=165, accepted=144, acceptance=0.87))
+        receipt = tracker.flush()[0]
+        assert receipt.generated_tokens == 144 + 55
+        assert receipt.decode_rate is not None
+
+    def test_slot_timing_before_the_end_line(self):
+        tracker = Tracker()
+        self._drive(tracker)
+        tracker.feed(SlotTiming(ts=T0 + 15, task=7, kind="eval", ms=12_000.0, tokens=199, tokens_per_s=16.6))
+        tracker.feed(end(T0 + 15.7, duration=15.6))
+        receipt = tracker.flush()[0]
+        assert receipt.generated_exact is True
+        assert receipt.decode_rate == pytest.approx(16.6)
+
+    def test_both_orderings_agree(self):
+        before, after = Tracker(), Tracker()
+        stats = SpeculativeStats(ts=T0 + 15.6, iterations=55, drafted=165, accepted=144, acceptance=0.87)
+        self._drive(before)
+        before.feed(stats)
+        before.feed(end(T0 + 15.7, duration=15.6))
+        self._drive(after)
+        after.feed(end(T0 + 15.7, duration=15.6))
+        after.feed(stats)
+        first, second = before.flush()[0], after.flush()[0]
+        assert first.generated_tokens == second.generated_tokens
+        assert first.decode_rate == pytest.approx(second.decode_rate)
+
+    def test_last_decode_rate_is_set_from_either_side(self):
+        tracker = Tracker()
+        self._drive(tracker)
+        tracker.feed(SlotTiming(ts=T0 + 15, task=7, kind="eval", ms=1000.0, tokens=25, tokens_per_s=25.0))
+        tracker.feed(end(T0 + 15.7, duration=15.6))
+        tracker.flush()
+        assert tracker.last_decode_rate == pytest.approx(25.0)

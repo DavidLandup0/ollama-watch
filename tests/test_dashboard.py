@@ -216,13 +216,6 @@ def test_rate_rows_say_which_number_they_are_showing():
     assert "last" in rows["output"]    # generation rate is always historical
 
 
-def test_in_flight_request_shows_a_live_cell_after_a_divider():
-    from ollama_watch.dashboard import spark_live
-
-    assert spark_live([10.0, 20.0], 30.0, 4) == "▃▅┃█"
-    assert spark_live([10.0, 20.0], None, 4) == "▄█"
-
-
 def test_generating_phase_labels_the_input_rate_as_this_request():
     tracker = Tracker()
     tracker.feed(CacheVerdict(ts=T0, total=5000, cached=4999, remaining=1))

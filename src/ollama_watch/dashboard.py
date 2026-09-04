@@ -68,21 +68,6 @@ def spark(values: list[float], width: int) -> str:
     return "".join(SPARK[min(len(SPARK) - 1, int(v / peak * (len(SPARK) - 1)))] for v in recent)
 
 
-def spark_live(history: list[float], live: float | None, width: int) -> str:
-    """History, then a divider, then a cell for the request in flight.
-
-    Both are scaled together so the live cell is comparable to the bars behind
-    it. Without the divider a provisional value would be indistinguishable
-    from a finished one.
-    """
-    if live is None:
-        return spark(history, width)
-    scaled = spark(history + [live], width + 1)
-    if len(scaled) < 2:
-        return scaled
-    return f"{scaled[:-1]}\u2503{scaled[-1]}"
-
-
 def gauge(fraction: float, width: int) -> str:
     fraction = min(1.0, max(0.0, fraction))
     filled = int(fraction * width)
@@ -233,21 +218,19 @@ class Dashboard:
         history: list[float],
         width: int,
         pair: int,
-        *,
-        live: float | None = None,
     ) -> None:
         spark_width = max(8, min(32, width - 52))
         value = f"{current:.0f} tok/s" if current else "--"
         # padded to a fixed width: the two rows hold different numbers of bars,
         # and a ragged right edge is what made this read as clutter
-        bars = spark_live(history, live, spark_width).ljust(spark_width + 1)
+        bars = spark(history, spark_width).ljust(spark_width)
         span = f"{min(history):.0f}-{max(history):.0f}" if len(history) >= 2 else ""
         self.field(label, f"{bars}  {value.rjust(9)} {tag.ljust(5)} {span}", colour(pair))
 
     def _rates(self, update, width: int) -> None:
         """Sparklines are one bar per finished request.
 
-        The numbers beside them mean different things by phase, and say which:
+        The number beside them means different things by phase, and says which:
         the input rate is live only while input is being processed, and the
         generation rate is never live -- nothing is logged per token, so it is
         always the last request that reported one.
@@ -255,12 +238,12 @@ class Dashboard:
         state = update.state
         last = self.receipts[-1] if self.receipts else None
         if state.phase is Phase.PREFILL:
-            rate, tag, live = state.prefill_rate, "now", state.prefill_rate
+            rate, tag = state.prefill_rate, "now"
         elif state.phase is Phase.DECODE:
-            rate, tag, live = state.prefill_rate, "req", state.prefill_rate
+            rate, tag = state.prefill_rate, "req"
         else:
-            rate, tag, live = (last.prefill_rate if last else None), "last", None
-        self._rate_row("input", rate, tag, list(self.input_rates), width, MAGENTA, live=live)
+            rate, tag = (last.prefill_rate if last else None), "last"
+        self._rate_row("input", rate, tag, list(self.input_rates), width, MAGENTA)
         self._rate_row(
             "output", update.last_decode_rate, "last", list(self.output_rates), width, GREEN
         )

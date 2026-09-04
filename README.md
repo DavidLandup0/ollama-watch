@@ -64,7 +64,7 @@ Park it in a split pane next to whatever is talking to Ollama.
          ███████████████████████████████████░░░░░░░░░  80.2%  41.0k/51.1k
          cached 34.8k  eta 1m47s  ttft so far 2m10s
 
- input   ▆▅▅▅▅▄▄▄▅▅▅▅▄█▃            55 tok/s now   25-89
+ input   ▆▅▅▅▅▄▄▄▅▅▅▅▄█▃           55 tok/s now   25-89
  output  ▂▅▂▁▄▄█▃▂                  11 tok/s last  9-68
 
  memory  ███████████████████████████░░░┊░  31.7 of 36 GiB   peak 34.9 (97%)
@@ -99,6 +99,9 @@ is a lower bound, since the figure is only final once the request ends.
 ## Sparklines are history
 
 One bar per **finished** request, **oldest on the left, newest on the right**.
+The generation row has fewer bars than the input row: a request that failed or
+was cancelled processed input but produced no output, so it contributes a bar
+to one row and not the other.
 They do not move during a request. The current figure sits immediately to the
 right of the bars, beside the newest one, so the row reads oldest to newest to
 now in one direction. The number
@@ -194,9 +197,12 @@ short of `total` and an equality check for "done" never fires.
 request if its own reported duration lines up with the observed start.
 Otherwise a 63 ms keep-alive ping "completes" a three-minute request.
 
-**Trailing events straddle the end.** `peak memory` and `speculative decode
-stats` can arrive on either side of the request-end line, so a finished request
-is briefly held before its receipt is released.
+**Trailing events straddle the end.** `peak memory` and the decode metrics can
+arrive on either side of the request-end line -- the Gin access line carries
+only second resolution, so sub-second ordering decides. A finished request is
+briefly held so late arrivals attach, and metrics that arrive early are
+buffered on the live request. Handling only the late case silently loses the
+generation figures for most requests.
 
 ## Generation rate
 

@@ -70,6 +70,10 @@ class RequestState:
     #: False when we joined a request already in flight and so never saw its
     #: cache verdict; the totals are then relative, not absolute.
     cached_known: bool = True
+    #: Decode metrics that arrived *before* the request-end line. The runner
+    #: logs them on either side of it, so they must be held either way.
+    speculative: "SpeculativeStats | None" = None
+    slot_eval: "SlotTiming | None" = None
     samples: deque = field(default_factory=lambda: deque(maxlen=RATE_WINDOW))
 
     @property
@@ -367,6 +371,12 @@ class Tracker:
             peak_memory=st.peak_memory,
             decode_s=decode_s,
         )
+        if st.speculative is not None:
+            self._apply_speculative(receipt, st.speculative)
+        if st.slot_eval is not None:
+            self._apply_slot(receipt, st.slot_eval)
+        self._note_decode_rate(receipt)
+
         self.state = RequestState()
         # Hold it: peak memory and decode stats may still be on their way.
         self._pending = receipt
@@ -382,28 +392,43 @@ class Tracker:
         else:
             self.state.peak_memory = event.size
 
+    @staticmethod
+    def _apply_speculative(receipt: Receipt, event: SpeculativeStats) -> None:
+        receipt.generated_tokens = event.generated_tokens
+        receipt.generated_exact = False
+        receipt.acceptance = event.acceptance
+        if receipt.decode_s and receipt.decode_s > 0:
+            receipt.decode_rate = event.generated_tokens / receipt.decode_s
+            receipt.decode_rate_exact = False
+
+    @staticmethod
+    def _apply_slot(receipt: Receipt, event: SlotTiming) -> None:
+        receipt.generated_tokens = event.tokens
+        receipt.generated_exact = True
+        receipt.decode_s = event.ms / 1000.0
+        if event.tokens_per_s:
+            receipt.decode_rate = event.tokens_per_s
+            receipt.decode_rate_exact = True
+
+    def _note_decode_rate(self, receipt: Receipt) -> None:
+        if receipt.decode_rate:
+            self.last_decode_rate = receipt.decode_rate
+            self.last_decode_exact = receipt.decode_rate_exact
+
     def _attach_speculative(self, event: SpeculativeStats) -> None:
         target = self._target()
-        if target is None:
+        if target is None:  # arrived before the request-end line
+            self.state.speculative = event
             return
-        target.generated_tokens = event.generated_tokens
-        target.generated_exact = False
-        target.acceptance = event.acceptance
-        if target.decode_s and target.decode_s > 0:
-            target.decode_rate = event.generated_tokens / target.decode_s
-            target.decode_rate_exact = False
-            self.last_decode_rate = target.decode_rate
-            self.last_decode_exact = False
+        self._apply_speculative(target, event)
+        self._note_decode_rate(target)
 
     def _attach_slot(self, event: SlotTiming) -> None:
-        target = self._target()
-        if target is None or event.kind != "eval":
+        if event.kind != "eval":
             return
-        target.generated_tokens = event.tokens
-        target.generated_exact = True
-        target.decode_s = event.ms / 1000.0
-        if event.tokens_per_s:
-            target.decode_rate = event.tokens_per_s
-            target.decode_rate_exact = True
-            self.last_decode_rate = event.tokens_per_s
-            self.last_decode_exact = True
+        target = self._target()
+        if target is None:
+            self.state.slot_eval = event
+            return
+        self._apply_slot(target, event)
+        self._note_decode_rate(target)
