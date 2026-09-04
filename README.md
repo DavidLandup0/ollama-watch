@@ -28,17 +28,14 @@ Run it:
 ollama-watch
 ```
 
-Watch a long prompt go through:
+With a historical log + pinned bottom current state:
 
 ```
-[qwen3.8:27b-mlx 22GB 100%GPU ctx32768] Processing input ████████░░░░░░  79.3% 38.9k/49.1k cached 34.8k 64 tok/s eta 2m39s
-```
+✔ 16:23:34 200 32.243998125s | input 48.2k cached 47.9k processed 343 @ 44 tok/s (7.8s) | out ~307 @ ~13 tok/s (23.6s) mtp_accept_rate 0.79 | peak 32.78 GiB
+✔ 16:24:15 200 26.539759625s | input 48.5k cached 48.2k processed 231 @ 51 tok/s (4.5s) | out ~194 @ ~9 tok/s (21.9s) mtp_accept_rate 0.80 | peak 34.38 GiB
+✔ 16:26:54 200 2m27s | input 48.8k cached 48.5k processed 282 @ 60 tok/s (4.7s) | out ~1632 @ ~11 tok/s (2m21s) mtp_accept_rate 0.67 | peak 32.83 GiB
 
-Finished requests scroll above the live line as one-line receipts:
-
-```
-✔ 13:40:37 200 2m50s | input 41.9k cached 31.9k processed 10.0k @ 67 tok/s (2m50s) | out ~557 @ ~24 tok/s (23.1s) mtp_accept_rate 0.84
-✖ 14:00:21 500 2m58s | input 49.1k processed 12.3k @ 80 tok/s (2m48s)
+[qwen3.8:27b-mlx 34GB 100%GPU ctx65536 ∞] Processing input ███████████████████████████░  99.3% 48.7k/49.1k cached 48.7k
 ```
 
 `Ctrl+C` prints a session summary: median input and output rates, total tokens, cache hit share, and failure count.
@@ -65,27 +62,37 @@ ollama-watch --no-server           # skip /api/ps (no model details in the heade
 `ollama-watch -d` gives a full-screen view. `q` quits.
 
 ```
- ollama-watch
- model   qwen3.8:27b-mlx  36GB  100% GPU  ctx32768<51.1k  ∞
+ollama-watch
+ model   qwen3.8:27b-mlx  33GB  100% GPU  ctx65536  ∞
 
- status  Processing input
-         ███████████████████████████████████░░░░░░░░░  80.2%  41.0k/51.1k
-         cached 34.8k  eta 1m47s  ttft so far 2m10s
+ status  Generating
+         ████████████████████████████████████████████████████████████████████████████████ 2m01s
+         input 48.8k  last ~9 tok/s
 
- input   ▆▅▅▅▅▄▄▄▅▅▅▅▄█▃           55 tok/s now   25-89
- output  ▂▅▂▁▄▄█▃▂                  11 tok/s last  9-68
+ input   █▇▆▄▄▇▅▄▁▂▂▄▄▅▄▃▂▅▇▄▅▅▅▂▄▃▅▄▄▄     60 tok/s req   5-92
+ output  ▅█▆▅▅▅▅▃▇▅▅▄▅▇▄▆▅▅▅▅▅▅▆▄            9 tok/s last  6-18
 
- memory  ███████████████████████████░░░┊░  31.7 of 36 GiB   peak 34.9 (97%)
+ memory  ██████████████████████████████████░░░░┊░  30.7 of 36 GiB   peak 34.4 (96%)
 
- session 1h23m   working 24m17s (29%)   idle 58m57s (71%)
-         █████████▓▒▒░░░░░░░░░░░░░░░░░░░░░░░░░░░░  █ input 18m51s  ▓ output 2m30s  ▒ other 2m56s  ░ idle 58m57s
+ session 1h20m   working 1h00m (75%)   idle 20m24s (25%)
+         █████████████████▓▓▓▓▓▓▓▓▓▓▓▓▒░░░░░░░░░░  █ input 35m21s  ▓ output 22m51s  ▒ other 2m11s  ░ idle 20m24s
 
        time      code    input   in/s   cache     out   out/s   queue    ttft     dur       peak
- + 13:42:22       200    50.3k     30     98%    ~303     ~12    2.0s   43.0s   1m08s   33.2 GiB
- ! 13:37:57       500    49.1k    164                            3.0s   5m03s   5m03s   32.6 GiB
- + 14:09:19       200     6930     46           ~1192     ~48    9.0s   2m40s   3m05s   35.0 GiB
+ + 15:59:26       200    54.8k     58     99%   ~3028     ~11            4.6s   4m44s   33.1 GiB
+ + 16:03:42       200    12.2k     88      0%   ~1759     ~17           2m15s   3m57s   35.5 GiB
+ - 16:09:40    cancel    43.9k     51     72%                                   4m05s   52.5 GiB
+ - 16:12:05     super    43.9k     59    100%   ~1349     ~10                   2m24s   33.0 GiB
+ + 16:13:19       200    44.9k     57     98%    ~719     ~13           16.5s   1m13s   35.5 GiB
+ + 16:14:22       200    45.5k     66     99%    ~396     ~12   359ms   10.4s   44.3s   34.8 GiB
+ + 16:17:57       200    45.8k     19     99%    ~239     ~10   569ms   13.9s   36.9s   34.9 GiB
+ + 16:18:57       200    46.4k     52     99%    ~277     ~12   769ms   13.5s   37.1s   34.2 GiB
+ + 16:20:27       200    46.6k     28    100%    ~599     ~10   169ms    7.2s   1m05s   35.5 GiB
+ + 16:21:34       200    47.3k     61     99%    ~411     ~11   572ms   11.1s   49.1s   32.4 GiB
+ + 16:22:45       200    47.9k     49     99%    ~466     ~12   927ms   14.4s   53.2s   33.2 GiB
+ + 16:23:34       200    48.2k     44     99%    ~307     ~13   850ms    8.7s   32.2s   32.8 GiB
+ + 16:24:15       200    48.5k     51    100%    ~194      ~9    92ms    4.6s   26.5s   34.4 GiB
 
- 7 req  cache 68%  median in 46 tok/s  median out 22 tok/s  median ttft 2m56s  failed 1  q quit
+ 30 req  cache 82%  median in 52 tok/s  median out 12 tok/s  median ttft 16.5s  failed 4  q quit
 ```
 
 ### Session Accounting
