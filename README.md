@@ -1,20 +1,37 @@
 <div align="center">
-<h3>ollama-watch</h3>
-<p><i>Terminal observability for local model status via Ollama</i></p>
+
+# ollama-watch
+
+*Terminal observability for local model status via Ollama*
+
+[![python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](./pyproject.toml)
+[![stdlib-only](https://img.shields.io/badge/deps-stdlib_only-green)](./src/ollama_watch)
+[![license](https://img.shields.io/badge/license-Apache--2.0-lightgrey)](./LICENSE.md)
+
+**Live prefill and decode progress from Ollama's runner.**
+
+**Standard library only. No dependencies.**
+
+<img src="assets/dash.png" width="420" alt="ollama-watch dashboard">
+
+[Dashboard](#dashboard) · [Library](#as-a-library) · [Quickstart](#quickstart) · [Tests](#tests) · [Contributing](#contributing)
+
 </div>
 
-<hr>
+---
 
-<div align="center">
-<p><strong>Live prefill and decode progress from Ollama's runner.</strong></p>
-<p><strong>Standard library only. No dependencies.</strong></p>
-</div>
+## Contents
 
-<div align="center">
-<a href="#dashboard">Dashboard</a> |
-<a href="#as-a-library">Library</a> |
-</div>
-<hr>
+- [Quickstart](#quickstart)
+- [Dashboard](#dashboard)
+  - [Session Accounting](#session-accounting)
+  - [Time To First Token](#time-to-first-token)
+  - [Sparklines](#sparklines)
+- [As A Library](#as-a-library)
+- [Tests](#tests)
+- [Contributing](#contributing)
+
+---
 
 ## Quickstart
 
@@ -30,7 +47,7 @@ ollama-watch
 
 With a historical log + pinned bottom current state:
 
-```
+```text
 ✔ 16:23:34 200 32.243998125s | input 48.2k cached 47.9k processed 343 @ 44 tok/s (7.8s) | out ~307 @ ~13 tok/s (23.6s) mtp_accept_rate 0.79 | peak 32.78 GiB
 ✔ 16:24:15 200 26.539759625s | input 48.5k cached 48.2k processed 231 @ 51 tok/s (4.5s) | out ~194 @ ~9 tok/s (21.9s) mtp_accept_rate 0.80 | peak 34.38 GiB
 ✔ 16:26:54 200 2m27s | input 48.8k cached 48.5k processed 282 @ 60 tok/s (4.7s) | out ~1632 @ ~11 tok/s (2m21s) mtp_accept_rate 0.67 | peak 32.83 GiB
@@ -38,7 +55,7 @@ With a historical log + pinned bottom current state:
 [qwen3.8:27b-mlx 34GB 100%GPU ctx65536 ∞] Processing input ███████████████████████████░  99.3% 48.7k/49.1k cached 48.7k
 ```
 
-`Ctrl+C` prints a session summary: median input and output rates, total tokens, cache hit share, and failure count.
+> `Ctrl+C` prints a session summary: median input and output rates, total tokens, cache hit share, and failure count.
 
 Or run it straight from a clone:
 
@@ -57,11 +74,13 @@ ollama-watch --log /path/to/server.log --host 127.0.0.1:11434
 ollama-watch --no-server           # skip /api/ps (no model details in the header)
 ```
 
+---
+
 ## Dashboard
 
 `ollama-watch -d` gives a full-screen view. `q` quits.
 
-```
+```text
 ollama-watch
  model   qwen3.8:27b-mlx  33GB  100% GPU  ctx65536  ∞
 
@@ -115,6 +134,8 @@ The figure to the right of each sparkline is the min-max rate across its bars. S
 
 Also, each sparkline is scaled to its own peak.
 
+---
+
 ## As A Library
 
 Everything the CLI shows is available programmatically, so you can build your own CLI, your own dashboard, or feed the numbers into something else entirely — a status bar, a progress widget in your own Ollama client, a metrics exporter, etc.
@@ -152,11 +173,15 @@ for update in watch():
         print(f"\r{mark} {receipt.prompt_tokens} in, {ttft}")
 ```
 
+---
+
 ## Tests
 
 ```bash
 uv run --with pytest python -m pytest
 ```
+
+---
 
 ## Contributing
 
