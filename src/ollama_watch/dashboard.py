@@ -7,10 +7,12 @@ import time
 from collections import deque
 from datetime import datetime
 
+from .client import DEFAULT_HOST, check_prerequisites
 from .render import bar as gauge  # the dashboard's name for it
 from .render import human_duration, human_tokens, median, session_bar
 from .session import Session
 from .state import Phase, Receipt
+from .tail import DEFAULT_LOG
 from .watch import watch
 
 SPARK = "▁▂▃▄▅▆▇█"
@@ -349,6 +351,16 @@ def _init_colours() -> None:
 
 def run(**kwargs) -> int:
     """Run the dashboard until the log ends or the user quits."""
+    import sys
+
+    error = check_prerequisites(
+        kwargs.get("log", DEFAULT_LOG),
+        kwargs.get("host", DEFAULT_HOST),
+        kwargs.get("query_server", True),
+    )
+    if error is not None:
+        print(error, file=sys.stderr)
+        return 1
 
     def loop(screen) -> None:
         curses.curs_set(0)

@@ -5,7 +5,7 @@ import signal
 import sys
 import time
 
-from .client import DEFAULT_HOST
+from .client import DEFAULT_HOST, check_prerequisites
 from .render import (
     Style,
     format_receipt,
@@ -137,6 +137,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+
+    error = check_prerequisites(args.log, args.host, query_server=not args.no_server)
+    if error is not None:
+        print(error, file=sys.stderr)
+        return 1
 
     if args.dashboard:
         from .dashboard import run

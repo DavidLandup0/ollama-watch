@@ -1,4 +1,4 @@
-from .client import DEFAULT_HOST, ModelInfo, fetch_loaded_model
+from .client import DEFAULT_HOST, ModelInfo, check_prerequisites, fetch_loaded_model, ping_server
 from .dashboard import Dashboard, gauge, spark
 from .events import (
     PREFILL_BATCH,
@@ -46,6 +46,7 @@ __all__ = [
     "Update",
     "__version__",
     "dur_seconds",
+    "check_prerequisites",
     "fetch_loaded_model",
     "follow_lines",
     "gauge",
@@ -53,6 +54,7 @@ __all__ = [
     "format_status",
     "parse_kv",
     "parse_line",
+    "ping_server",
     "segmented_bar",
     "spark",
     "watch",

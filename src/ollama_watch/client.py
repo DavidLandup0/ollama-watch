@@ -31,6 +31,39 @@ class ModelInfo:
         return self.size_vram_bytes / self.size_bytes
 
 
+def ping_server(host: str = DEFAULT_HOST, timeout: float = 2.0) -> bool:
+    """True if the Ollama server answers at all, even with an error status.
+
+    Unlike `fetch_loaded_model` (which returns None both when the server is
+    down and when it is simply idle), this distinguishes "server down" from
+    "server up, no model loaded": an HTTP response of any kind means reachable.
+    """
+    try:
+        with urllib.request.urlopen(f"http://{host}/api/ps", timeout=timeout):
+            return True
+    except urllib.error.HTTPError:
+        return True
+    except (urllib.error.URLError, OSError, TimeoutError):
+        return False
+
+
+def check_prerequisites(log: str, host: str, query_server: bool) -> str | None:
+    """Return an error message if ollama-watch cannot usefully start, else None."""
+    import os
+
+    if query_server and not ping_server(host):
+        return (
+            f"ollama-watch: cannot reach Ollama server at {host} "
+            f"(is `ollama serve` running?)"
+        )
+    if not os.path.exists(log):
+        return (
+            f"ollama-watch: log file not found: {log} "
+            f"(is Ollama running? pass --log to override)"
+        )
+    return None
+
+
 def fetch_loaded_model(host: str = DEFAULT_HOST, timeout: float = 2.0) -> ModelInfo | None:
     """Return the first loaded model, or None if the server is down or idle."""
     try:
