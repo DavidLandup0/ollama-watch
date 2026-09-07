@@ -4,15 +4,19 @@
 
 *Terminal observability for local model status via Ollama*
 
-[![python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](./pyproject.toml)
-[![stdlib-only](https://img.shields.io/badge/deps-stdlib_only-green)](./src/ollama_watch)
-[![license](https://img.shields.io/badge/license-Apache--2.0-lightgrey)](./LICENSE.md)
+[![python](https://img.shields.io/badge/python-%3E%3D3.10-blue)](https://github.com/DavidLandup0/ollama-watch/blob/main/pyproject.toml)
+[![stdlib-only](https://img.shields.io/badge/deps-stdlib_only-green)](https://github.com/DavidLandup0/ollama-watch/tree/main/src/ollama_watch)
+[![license](https://img.shields.io/badge/license-Apache--2.0-lightgrey)](https://github.com/DavidLandup0/ollama-watch/blob/main/LICENSE.md)
 
 **Live prefill and decode progress from Ollama's runner.**
 
 **Standard library only. No dependencies.**
 
-<img src="assets/dash.png" width="420" alt="ollama-watch dashboard">
+ollama serves models for that various harnesses consume (OpenCode, Hermes, Pi, etc). but they're built for low-latency, high throughput remote servers. When running locally, high latency, slow prefills and a lack of observability for these is bad UX.
+
+`ollama-watch` is a parser of the `ollama` server logs, that formats them and displays them conveniently either as a log or CLI dashboard.
+
+<img src="https://raw.githubusercontent.com/DavidLandup0/ollama-watch/main/assets/dash.png" width="420" alt="ollama-watch dashboard">
 
 [Dashboard](#dashboard) · [Library](#as-a-library) · [Quickstart](#quickstart) · [Tests](#tests) · [Contributing](#contributing)
 
@@ -36,7 +40,13 @@
 ## Quickstart
 
 ```bash
-uv tool install .          # or: pipx install .
+pip install ollama-watch
+```
+
+Or with `uv`:
+
+```bash
+uv pip install ollama-watch
 ```
 
 Run it:
@@ -44,6 +54,8 @@ Run it:
 ```bash
 ollama-watch
 ```
+
+
 
 With a historical log + pinned bottom current state:
 
