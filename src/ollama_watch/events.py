@@ -3,8 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Union
 
-#: The runner processes the prompt in batches of this many tokens, and logs
-#: one progress line per batch.
+#: The MLX runner processes the prompt in batches of this many tokens, and
+#: logs one progress line per batch. The llama.cpp runner uses a smaller
+#: batch, so this is only the assumption to fall back on before any batch has
+#: been observed -- see `RequestState.batch_tokens`.
 PREFILL_BATCH = 2048
 
 
@@ -39,6 +41,41 @@ class Progress:
     ts: float
     processed: int
     remaining_total: int
+
+
+@dataclass(frozen=True)
+class PrefillDone:
+    """Input processing finished and sampling began.
+
+    The llama.cpp runner logs `init sampler` once the whole prompt is
+    consumed; `total` is the exact prompt length, correcting the rounded
+    estimate derived from progress fractions.
+    """
+
+    ts: float
+    total: int
+
+
+@dataclass(frozen=True)
+class DecodeTick:
+    """One streaming decode sample from the llama.cpp runner.
+
+    `n_gen = 100, tg = 4.80 t/s, tg_3s = 4.85 t/s` lines arrive while tokens
+    stream out, so unlike the end-of-request summaries this is live.
+    `generated` counts tokens produced so far, `rate` is the average since
+    generation began, and `recent_rate` covers only the last few seconds --
+    the one that moves when generation speeds up or slows down.
+    """
+
+    ts: float
+    generated: int
+    rate: float
+    recent_rate: float | None = None
+
+    @property
+    def current_rate(self) -> float:
+        """The rate to report live: recent if the runner gave one."""
+        return self.recent_rate or self.rate
 
 
 @dataclass(frozen=True)
@@ -115,6 +152,8 @@ class RunnerReady:
 Event = Union[
     CacheVerdict,
     Progress,
+    PrefillDone,
+    DecodeTick,
     RequestEnd,
     Terminated,
     PeakMemory,

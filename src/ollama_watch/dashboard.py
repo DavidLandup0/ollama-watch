@@ -129,7 +129,7 @@ class Dashboard:
     # ---- frame ----
     def _absorb(self, update) -> None:
         """Fold an update's finished requests into the history the frame reads."""
-        self.session.observe(update.event.ts if update.event else time.time())
+        self.session.observe(update.event.ts if update.event else update.now)
         for receipt in update.receipts:
             self.receipts.append(receipt)
             self.session.add(receipt)
@@ -187,7 +187,7 @@ class Dashboard:
             last = self.receipts[-1] if self.receipts else None
             detail = "waiting for request"
             if last is not None:
-                ago = max(0.0, time.time() - last.ts)
+                ago = max(0.0, update.now - last.ts)
                 detail += f"   last {human_duration(ago)} ago"
             self.field("status", f"idle   {detail}", curses.A_DIM)
             return
@@ -207,18 +207,23 @@ class Dashboard:
                 detail.append(f"eta {human_duration(state.eta_s)}")
             if state.started_at:
                 # no token has been emitted yet, so this is TTFT so far
-                detail.append(f"ttft so far {human_duration(time.time() - state.started_at)}")
+                detail.append(f"ttft so far {human_duration(update.now - state.started_at)}")
             self.field("", "  ".join(detail), curses.A_DIM)
             return
 
         self.field("status", "Generating", colour(GREEN) | curses.A_BOLD)
-        self.field("", f"{gauge(1.0, bar_width)} {human_duration(state.decode_elapsed_s())}")
-        reference = (
+        self.field("", f"{gauge(1.0, bar_width)} {human_duration(state.decode_elapsed_s(update.now))}")
+        detail = []
+        if state.prompt_tokens:  # unknown when we joined the request mid-decode
+            detail.append(f"input {human_tokens(state.prompt_tokens)}")
+        if state.generated_tokens:
+            detail.append(f"out {human_tokens(state.generated_tokens)}")
+        detail.append(
             f"last {'' if update.last_decode_exact else '~'}{update.last_decode_rate:.0f} tok/s"
             if update.last_decode_rate
             else "no rate reported yet"
         )
-        self.field("", f"input {human_tokens(state.prompt_tokens)}  {reference}", curses.A_DIM)
+        self.field("", "  ".join(detail), curses.A_DIM)
 
     def _rate_row(
         self,

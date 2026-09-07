@@ -201,10 +201,13 @@ def format_status(
         style.green(PHASE_LABELS[Phase.DECODE]),
         human_duration(state.decode_elapsed_s(now)),
     ]
+    if state.generated_tokens:
+        parts.append(style.dim(f"out {human_tokens(state.generated_tokens)}"))
     if last_decode_rate:
         marker = "" if last_decode_exact else "~"
         parts.append(style.dim(f"last {marker}{last_decode_rate:.0f} tok/s"))
-    parts.append(style.dim(f"input {human_tokens(state.prompt_tokens)}"))
+    if state.prompt_tokens:  # unknown when we joined the request mid-decode
+        parts.append(style.dim(f"input {human_tokens(state.prompt_tokens)}"))
     return " ".join(parts)
 
 

@@ -190,11 +190,11 @@ def main(argv: list[str] | None = None) -> int:
                     state,
                     update.model,
                     style,
-                    now=time.time(),
+                    now=update.now,
                     last_decode_rate=update.last_decode_rate,
                     last_decode_exact=update.last_decode_exact,
                 ),
-                key=(state.phase, state.done_tokens),
+                key=(state.phase, state.done_tokens, state.generated_tokens),
             )
     finally:
         display.clear()

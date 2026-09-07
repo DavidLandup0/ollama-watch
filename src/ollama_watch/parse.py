@@ -6,8 +6,10 @@ from datetime import datetime
 
 from .events import (
     CacheVerdict,
+    DecodeTick,
     Event,
     PeakMemory,
+    PrefillDone,
     Progress,
     RequestEnd,
     RunnerReady,
@@ -24,6 +26,18 @@ RE_DUR = re.compile(r"([\d.]+)(h|ms|µs|us|m|s)")
 RE_SLOT = re.compile(
     r"slot print_timing:.*?task\s+(\d+)\s+\|\s+(prompt eval time|eval time|total time)\s+=\s+"
     r"([\d.]+)\s+ms\s+/\s+(\d+)\s+tokens(?:.*?([\d.]+)\s+tokens per second)?"
+)
+#: The llama.cpp (GGUF) runner's slot lines, written bare to stderr with no
+#: timestamp of their own and so read at `now`. The MLX runner reports the
+#: same milestones as slog lines, handled below.
+RE_NEW_PROMPT = re.compile(r"new prompt,.*?task\.n_tokens\s*=\s*(\d+)")
+RE_PROMPT_PROGRESS = re.compile(
+    r"prompt processing,\s*n_tokens\s*=\s*(\d+),\s*progress\s*=\s*([\d.]+)"
+)
+RE_INIT_SAMPLER = re.compile(r"init sampler,.*?tokens:\s*text\s*=\s*(\d+),\s*total\s*=\s*(\d+)")
+RE_N_GEN = re.compile(
+    r"n_gen\s*=\s*(\d+),\s*tg\s*=\s*([\d.]+)\s*t/s"
+    r"(?:,\s*tg_3s\s*=\s*([\d.]+)\s*t/s)?"
 )
 
 _SLOT_KINDS = {"prompt eval time": "prompt_eval", "eval time": "eval", "total time": "total"}
@@ -112,6 +126,33 @@ def parse_line(line: str, *, now: float | None = None) -> Event | None:
             tokens_per_s=float(tps) if tps else None,
         )
 
+    new_prompt = RE_NEW_PROMPT.search(line)
+    if new_prompt:
+        # A request started; nothing is known cached, so the whole prompt
+        # is the work left -- the same shape as a cache-miss verdict.
+        total = int(new_prompt.group(1))
+        return CacheVerdict(ts=now, total=total, cached=0, remaining=total)
+
+    progress = RE_PROMPT_PROGRESS.search(line)
+    if progress:
+        processed, fraction = int(progress.group(1)), float(progress.group(2))
+        total = int(processed / fraction) if fraction > 0 else processed
+        return Progress(ts=now, processed=processed, remaining_total=total)
+
+    sampler = RE_INIT_SAMPLER.search(line)
+    if sampler:
+        return PrefillDone(ts=now, total=int(sampler.group(2)))
+
+    tick = RE_N_GEN.search(line)
+    if tick:
+        generated, rate, recent = tick.groups()
+        return DecodeTick(
+            ts=now,
+            generated=int(generated),
+            rate=float(rate),
+            recent_rate=float(recent) if recent else None,
+        )
+
     kv = parse_kv(line)
     msg = kv.get("msg")
     if not msg:
@@ -145,3 +186,39 @@ def parse_line(line: str, *, now: float | None = None) -> Event | None:
     if msg in RUNNER_READY:
         return RunnerReady(ts=ts)
     return None
+
+
+def line_ts(line: str) -> float | None:
+    """The timestamp a line carries of its own, if any.
+
+    Gin access lines and slog lines are dated; the llama.cpp runner's slot
+    lines are not. Replaying history reads those at the clock of the last
+    dated line before them, rather than at the wall clock of the replay.
+    """
+    gin = RE_GIN.search(line)
+    if gin:
+        return parse_gin_ts(gin.group(1), gin.group(2))
+    return parse_ts(parse_kv(line).get("time"))
+
+
+#: Lines that open a request, whichever runner serves it: the MLX runner logs
+#: a prefix-cache verdict, the llama.cpp (GGUF) runner a `new prompt`.
+BEGIN_MARKERS = ('msg="cache hit"', 'msg="cache miss"', "new prompt,")
+
+#: Lines that close one. The llama.cpp runner releases its slot and reports
+#: itself idle; either runner's HTTP completion is logged by Gin, and a client
+#: that walks away is logged by the scheduler.
+END_MARKERS = ("all slots are idle", "stop processing:", 'msg="Request terminated"')
+
+
+def begins_request(line: str) -> bool:
+    """True when the line opens a request on either runner."""
+    return any(marker in line for marker in BEGIN_MARKERS)
+
+
+def ends_request(line: str) -> bool:
+    """True when the line closes a request: the runner finishing with it, or
+    the HTTP completion Gin logs once the response is out."""
+    if any(marker in line for marker in END_MARKERS):
+        return True
+    return isinstance(parse_line(line), RequestEnd)

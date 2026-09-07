@@ -158,3 +158,121 @@ def test_parse_kv_unquotes():
         "msg": "peak memory",
         "size": "21.80 GiB",
     }
+
+
+# --- llama.cpp (GGUF) runner slot lines: bare stderr, no timestamps ---
+
+SLOT_NEW_PROMPT = (
+    "slot   operator(): id  0 | task 7 | new prompt, n_ctx_slot = 4096, "
+    "n_keep = 4, task.n_tokens = 2050"
+)
+SLOT_PROMPT_HALF = (
+    "slot print_timing: id  0 | task 7 | prompt processing, n_tokens =   1024, "
+    "progress = 0.50, t =   7.78 s / 131.61 tokens per second"
+)
+SLOT_PROMPT_FULL = (
+    "slot print_timing: id  0 | task 7 | prompt processing, n_tokens =   2046, "
+    "progress = 1.00, t =  23.05 s / 88.75 tokens per second"
+)
+SLOT_INIT_SAMPLER = (
+    "slot init_sampler: id  0 | task 7 | init sampler, took 0.55 ms, "
+    "tokens: text = 2050, total = 2050"
+)
+SLOT_N_GEN = (
+    "slot print_timing: id  0 | task 7 | n_gen =    100, tg =   4.80 t/s, "
+    "tg_3s =   4.85 t/s"
+)
+SLOT_CACHED = (
+    "slot   operator(): id  0 | task 7 | cached n_tokens = 1024, "
+    "memory_seq_rm [1024, end)"
+)
+SLOT_RELEASE = (
+    "slot      release: id  0 | task 7 | stop processing: n_tokens = 2475, "
+    "truncated = 0"
+)
+SLOTS_IDLE = "srv  update_slots: all slots are idle"
+
+
+def test_slot_new_prompt_starts_like_a_cache_miss():
+    event = parse_line(SLOT_NEW_PROMPT, now=100.0)
+    assert isinstance(event, CacheVerdict)
+    assert (event.total, event.cached, event.remaining) == (2050, 0, 2050)
+    assert event.ts == 100.0
+
+
+def test_slot_prompt_progress_derives_the_total():
+    event = parse_line(SLOT_PROMPT_HALF, now=100.0)
+    assert isinstance(event, Progress)
+    assert event.processed == 1024
+    assert event.remaining_total == 2048  # int(1024 / 0.50)
+
+
+def test_slot_init_sampler_marks_prefill_done():
+    from ollama_watch.events import PrefillDone
+
+    event = parse_line(SLOT_INIT_SAMPLER, now=100.0)
+    assert isinstance(event, PrefillDone)
+    assert event.total == 2050
+
+
+def test_slot_n_gen_is_a_live_decode_tick():
+    from ollama_watch.events import DecodeTick
+
+    event = parse_line(SLOT_N_GEN, now=100.0)
+    assert isinstance(event, DecodeTick)
+    assert (event.generated, event.rate) == (100, pytest.approx(4.80))
+    # `tg` averages the request, `tg_3s` says what the rate is doing now
+    assert event.recent_rate == pytest.approx(4.85)
+    assert event.current_rate == pytest.approx(4.85)
+
+
+def test_a_decode_tick_without_a_recent_rate_falls_back_to_the_average():
+    event = parse_line(
+        "slot print_timing: id  0 | task 7 | n_gen =    100, tg =   4.80 t/s", now=100.0
+    )
+    assert event.recent_rate is None
+    assert event.current_rate == pytest.approx(4.80)
+
+
+def test_slot_bookkeeping_lines_are_dropped():
+    assert parse_line(SLOT_CACHED, now=100.0) is None
+    assert parse_line(SLOT_RELEASE, now=100.0) is None
+    assert parse_line(SLOTS_IDLE, now=100.0) is None
+
+
+def test_slot_summaries_still_parse():
+    # the end-of-request `prompt eval time` / `eval time` lines are unchanged
+    event = parse_line(SLOT_PROMPT, now=100.0)
+    assert isinstance(event, SlotTiming) and event.kind == "prompt_eval"
+
+
+class TestRequestBoundaries:
+    """Both runners open and close a request with lines of their own; seeding
+    reads them to tell a request still in flight from one already finished."""
+
+    def test_begins_on_either_runner(self):
+        from ollama_watch.parse import begins_request
+
+        assert begins_request(CACHE_MISS)  # mlx
+        assert begins_request(CACHE_HIT)
+        assert begins_request(SLOT_NEW_PROMPT)  # llama.cpp
+        assert not begins_request(PROGRESS)
+        assert not begins_request(GIN_GET)
+
+    def test_ends_on_either_runner(self):
+        from ollama_watch.parse import ends_request
+
+        assert ends_request(GIN_POST)  # the HTTP completion, either runner
+        assert ends_request(TERMINATED)
+        assert ends_request(SLOTS_IDLE)  # llama.cpp released its slot
+        assert ends_request(SLOT_RELEASE)
+        assert not ends_request(GIN_GET)  # bookkeeping, not inference
+        assert not ends_request(SLOT_N_GEN)
+        assert not ends_request(CACHE_HIT)
+
+    def test_line_ts_reads_the_clock_a_line_carries(self):
+        from ollama_watch.parse import line_ts, parse_gin_ts, parse_ts
+
+        assert line_ts(GIN_POST) == parse_gin_ts("2026/09/04", "14:00:21")
+        assert line_ts(CACHE_HIT) == parse_ts("2026-09-04T14:02:51.952+09:00")
+        assert line_ts(SLOT_N_GEN) is None  # llama.cpp slot lines carry none

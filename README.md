@@ -114,6 +114,14 @@ ollama-watch
  30 req  cache 82%  median in 52 tok/s  median out 12 tok/s  median ttft 16.5s  failed 4  q quit
 ```
 
+### Runner Support
+
+Supports:
+- mlx runner (native mlx models)
+- llama.cpp runner (`.gguf` models)
+
+**Note:** mlx Runner with MTP and llama.cpp runner expose metrics that can be used to either approximate tokens per second or read them directly. mlx runner without MTP doesn't, and `ollama-watch` will not display tokens per second for those configurations.
+
 ### Session Accounting
 
 The `session` panel splits the wall clock into where it was spent: model-work time, idle time, etc.

@@ -4,7 +4,14 @@ import pytest
 
 from ollama_watch import Phase, Tracker, format_receipt, format_status
 from ollama_watch.client import ModelInfo
-from ollama_watch.events import CacheVerdict, Progress, RequestEnd, SlotTiming
+from ollama_watch.events import (
+    CacheVerdict,
+    DecodeTick,
+    PrefillDone,
+    Progress,
+    RequestEnd,
+    SlotTiming,
+)
 from ollama_watch.render import PHASE_LABELS, Style, bar, human_duration, human_tokens
 
 T0 = 1_000_000.0
@@ -51,6 +58,35 @@ def test_generating_line_reports_elapsed_and_last_rate():
     assert "Generating" in line
     assert "12.4s" in line
     assert "last ~24 tok/s" in line
+
+
+def test_generating_line_counts_tokens_the_runner_reports():
+    """llama.cpp counts tokens as they stream; the line should say so."""
+    tracker = Tracker()
+    tracker.feed(CacheVerdict(ts=T0, total=2050, cached=0, remaining=2050))
+    tracker.feed(PrefillDone(ts=T0 + 30, total=2050))
+    tracker.feed(DecodeTick(ts=T0 + 60, generated=142, rate=4.6, recent_rate=5.2))
+    line = format_status(
+        tracker.state,
+        MODEL,
+        PLAIN,
+        now=T0 + 60,
+        last_decode_rate=tracker.last_decode_rate,
+        last_decode_exact=tracker.last_decode_exact,
+        columns=120,
+    )
+    assert "out 142" in line
+    assert "last 5 tok/s" in line  # the recent rate, not the 4.6 average
+    assert "input 2050" in line
+
+
+def test_generating_line_omits_an_unknown_prompt_size():
+    """Joined mid-decode, the prompt length is unknown -- `input 0` is a lie."""
+    tracker = Tracker()
+    tracker.feed(DecodeTick(ts=T0, generated=14, rate=4.6))
+    line = format_status(tracker.state, MODEL, PLAIN, now=T0, columns=120)
+    assert "input" not in line
+    assert "out 14" in line
 
 
 def test_idle_line():
